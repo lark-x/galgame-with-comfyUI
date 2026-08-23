@@ -1,0 +1,54 @@
+name: Sync upstream into lark
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '50 18 * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync fork main with its parent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/merge-upstream" \
+            -f branch=main
+
+      - name: Open a reviewed update into lark
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          ahead=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/compare/lark...main" \
+            --jq '.ahead_by')
+          if [ "$ahead" = "0" ]; then
+            echo "The lark branch already contains the current main branch."
+            exit 0
+          fi
+
+          existing=$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --base lark \
+            --head main \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Update PR #${existing} is already open."
+            exit 0
+          fi
+
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base lark \
+            --head main \
+            --title "chore: sync upstream Linshe" \
+            --body "Syncs the latest upstream main branch into the SthStart customization branch. Review conflicts and run the Linshe smoke checks before merging."
