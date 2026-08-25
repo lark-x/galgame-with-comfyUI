@@ -26,12 +26,22 @@ function configuredThinking() {
 // 复用单个 OpenAI 客户端实例，避免每次调用都创建新的 HTTP Agent
 // 频繁创建 client 会实例化底层 undici 连接池，在高并发场景下浪费 FD 和内存
 let _client = null;
+let _legacyClient = null;
+function clientOptions(usePublic = config.publicServices.llm && !config.llm.freeEgg) {
+  if (usePublic) return {
+    baseURL: `${config.publicServices.baseURL}/v1`,
+    apiKey: config.publicServices.appToken || 'missing-sthstart-token',
+    defaultHeaders: config.publicServices.llmProfile ? { 'X-SthStart-Profile': config.publicServices.llmProfile } : undefined,
+  };
+  return {
+    baseURL: config.llm.baseURL,
+    apiKey: config.llm.apiKey,
+    defaultHeaders: config.llm.headers && Object.keys(config.llm.headers).length > 0 ? config.llm.headers : undefined,
+  };
+}
 function getClient() {
   if (!_client) {
-    const opts = {
-      baseURL: config.llm.baseURL,
-      apiKey: config.llm.apiKey,
-    };
+    const opts = clientOptions();
     const headers = config.llm.headers;
     if (headers && Object.keys(headers).length > 0) {
       opts.defaultHeaders = headers;
@@ -47,8 +57,24 @@ function getClient() {
   return _client;
 }
 
+function getLegacyClient() {
+  if (!_legacyClient) _legacyClient = new OpenAI(clientOptions(false));
+  return _legacyClient;
+}
+
+async function createCompletion(params) {
+  try {
+    return await getClient().chat.completions.create(params);
+  } catch (error) {
+    if (!config.publicServices.llm) throw error;
+    console.warn(`[sthstart] public LLM unavailable before response; falling back to Linshe provider: ${error.message}`);
+    return getLegacyClient().chat.completions.create(params);
+  }
+}
+
 export function resetClient() {
   _client = null;
+  _legacyClient = null;
 }
 
 // ── 免费鸡蛋模型轮换：按 deepseek → MiMo → Hy3 依次请求，每个模型只请求一次；
@@ -242,7 +268,7 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
         await sleep(delay);
       }
 
-      const res = await getClient().chat.completions.create(params);
+      const res = await createCompletion(params);
       const content = res.choices[0].message.content;
 
       // 请求+响应一起输出，保证每次调用的日志是完整的原子块
@@ -401,7 +427,7 @@ async function* _chatStreamInner(messages, {
       Object.assign(params, extraBody);
     }
 
-    const stream = await getClient().chat.completions.create(params);
+    const stream = await createCompletion(params);
 
     console.log(`[${providerLabel()} ← ${label} start]`);
 

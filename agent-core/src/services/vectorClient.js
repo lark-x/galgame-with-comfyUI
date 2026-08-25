@@ -19,12 +19,31 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT) 
   }
 }
 
+async function vectorRequest(route, body, timeoutMs = DEFAULT_TIMEOUT) {
+  if (config.publicServices.vector && config.publicServices.appToken) {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.publicServices.appToken}`,
+        ...(config.publicServices.vectorProfile ? { 'X-SthStart-Profile': config.publicServices.vectorProfile } : {}),
+      };
+      const response = await fetchWithTimeout(`${config.publicServices.baseURL}/api/v1/vector/${route}`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ ...body, namespace: 'linshe-memory', purpose: 'memory' }),
+      }, timeoutMs);
+      if (response.ok) return response;
+      console.warn(`[sthstart] public vector ${route} returned ${response.status}; using Linshe vector service`);
+    } catch (error) {
+      console.warn(`[sthstart] public vector ${route} unavailable; using Linshe vector service: ${error.message}`);
+    }
+  }
+  return fetchWithTimeout(`${BASE}/${route}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }, timeoutMs);
+}
+
 export async function embedText(text) {
-  const res = await fetchWithTimeout(`${BASE}/embed`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
+  const res = await vectorRequest('embed', { text });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Embed error: ${err.detail || res.status}`);
@@ -35,11 +54,7 @@ export async function embedText(text) {
 }
 
 export async function embedBatch(texts) {
-  const res = await fetchWithTimeout(`${BASE}/embed`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: texts }),
-  });
+  const res = await vectorRequest('embed', { text: texts });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Embed error: ${err.detail || res.status}`);
@@ -49,11 +64,7 @@ export async function embedBatch(texts) {
 }
 
 export async function vectorSearch(text, { topK = 20, filterType = null, conversationId = null, corpus = 'memory_fragments', embedding = null, timeoutMs = DEFAULT_TIMEOUT } = {}) {
-  const res = await fetchWithTimeout(`${BASE}/search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, embedding, top_k: topK, filter_type: filterType, conversation_id: conversationId, corpus }),
-  }, timeoutMs);
+  const res = await vectorRequest('search', { text, embedding, top_k: topK, filter_type: filterType, conversation_id: conversationId, corpus }, timeoutMs);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Search error: ${err.detail || res.status}`);
@@ -63,18 +74,14 @@ export async function vectorSearch(text, { topK = 20, filterType = null, convers
 }
 
 export async function upsertVector(chromaId, text, metadata = {}, fragmentType = null, corpus = 'memory_fragments', embedding = null) {
-  const res = await fetchWithTimeout(`${BASE}/upsert`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const res = await vectorRequest('upsert', {
       chroma_id: chromaId,
       text,
       embedding,
       metadata,
       fragment_type: fragmentType,
       corpus,
-    }),
-  });
+    });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Upsert error: ${err.detail || res.status}`);
@@ -84,11 +91,7 @@ export async function upsertVector(chromaId, text, metadata = {}, fragmentType =
 }
 
 export async function upsertVectors(items, corpus = 'memory_fragments', timeoutMs = DEFAULT_TIMEOUT) {
-  const res = await fetchWithTimeout(`${BASE}/upsert-batch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items, corpus }),
-  }, timeoutMs);
+  const res = await vectorRequest('upsert-batch', { items, corpus }, timeoutMs);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Batch upsert error: ${err.detail || res.status}`);
@@ -98,11 +101,7 @@ export async function upsertVectors(items, corpus = 'memory_fragments', timeoutM
 }
 
 export async function deleteVector(chromaId, corpus = 'memory_fragments') {
-  const res = await fetchWithTimeout(`${BASE}/delete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chroma_id: chromaId, corpus }),
-  });
+  const res = await vectorRequest('delete', { chroma_id: chromaId, corpus });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Delete error: ${err.detail || res.status}`);
@@ -111,6 +110,13 @@ export async function deleteVector(chromaId, corpus = 'memory_fragments') {
 }
 
 export async function deleteByConversation(conversationId, corpus = 'memory_fragments') {
+  if (config.publicServices.vector && config.publicServices.appToken) {
+    const response = await vectorRequest('delete-by-conversation', { conversation_id: conversationId, corpus });
+    if (response.ok) {
+      const data = await response.json();
+      return data.deleted;
+    }
+  }
   const res = await fetchWithTimeout(`${BASE}/delete-by-conversation`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

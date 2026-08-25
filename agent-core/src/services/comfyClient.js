@@ -458,6 +458,10 @@ function formatComfyUIError(errText, status) {
 }
 
 export async function submitWorkflow(guiWorkflow, onProgress) {
+  if (config.publicServices.image && config.publicServices.appToken) {
+    const publicResult = await submitPublicWorkflow(guiWorkflow, onProgress);
+    if (publicResult) return publicResult;
+  }
   const clientId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const apiPrompt = guiToApi(guiWorkflow);
 
@@ -513,6 +517,60 @@ export async function submitWorkflow(guiWorkflow, onProgress) {
     console.warn(`[comfyClient] WebSocket failed (${err.message}), falling back to polling`);
     return await pollAndDownload(promptId, onProgress);
   }
+}
+
+async function submitPublicWorkflow(guiWorkflow, onProgress) {
+  const serviceBase = config.publicServices.baseURL;
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${config.publicServices.appToken}`,
+    'Idempotency-Key': `linshe-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`,
+    ...(config.publicServices.imageProfile ? { 'X-SthStart-Profile': config.publicServices.imageProfile } : {}),
+  };
+  let accepted;
+  try {
+    const response = await fetch(`${serviceBase}/api/v1/images/tasks`, {
+      method: 'POST', headers, body: JSON.stringify({ workflow: guiToApi(guiWorkflow) }),
+    });
+    if (!response.ok) {
+      console.warn(`[sthstart] public image request was not accepted (${response.status}); using direct ComfyUI`);
+      return null;
+    }
+    accepted = await response.json();
+    if (!accepted.id) {
+      console.warn('[sthstart] public image request returned no task id; using direct ComfyUI');
+      return null;
+    }
+  } catch (error) {
+    console.warn(`[sthstart] public image unavailable before task acceptance; using direct ComfyUI: ${error.message}`);
+    return null;
+  }
+
+  // Once a public task id exists, never submit the workflow again: this prevents duplicate images.
+  if (onProgress) onProgress({ phase: 'submitted', promptId: accepted.id });
+  const deadline = Date.now() + 600_000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${serviceBase}/api/v1/images/tasks/${accepted.id}`, {
+      headers: { Authorization: `Bearer ${config.publicServices.appToken}` },
+    });
+    if (!response.ok) throw new Error(`SthStart image task lookup returned ${response.status}`);
+    const task = await response.json();
+    if (task.status === 'complete') {
+      const images = [];
+      for (const artifact of task.artifacts || []) {
+        const artifactResponse = await fetch(new URL(artifact.url, serviceBase));
+        if (!artifactResponse.ok) throw new Error(`SthStart artifact download returned ${artifactResponse.status}`);
+        const contentType = artifactResponse.headers.get('content-type') || 'image/png';
+        const buffer = Buffer.from(await artifactResponse.arrayBuffer());
+        images.push({ base64: `data:${contentType};base64,${buffer.toString('base64')}`, filename: artifact.id });
+      }
+      if (onProgress) onProgress({ phase: 'done', promptId: accepted.id, imageCount: images.length, progress: 1 });
+      return { images, promptId: accepted.id };
+    }
+    if (task.status === 'failed' || task.status === 'cancelled') throw new Error(task.error || `SthStart image task ${task.status}`);
+    await sleep(1000);
+  }
+  throw new Error(`SthStart image task timeout for ${accepted.id}`);
 }
 
 // ── WebSocket 实时进度 + 结果监听 ──
