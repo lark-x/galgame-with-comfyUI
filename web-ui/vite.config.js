@@ -6,6 +6,9 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    // Quick Tunnel forwards its random *.trycloudflare.com Host header.
+    // Keep the allow-list scoped to Cloudflare's temporary tunnel domain.
+    allowedHosts: ['.trycloudflare.com'],
     proxy: {
       '/api': {
         target: 'http://localhost:3099',
