@@ -25,7 +25,6 @@ export const config = {
     llm: process.env.STHSTART_PUBLIC_LLM === 'true',
     vector: process.env.STHSTART_PUBLIC_VECTOR === 'true',
     image: process.env.STHSTART_PUBLIC_IMAGE === 'true',
-    llmProfile: process.env.STHSTART_LLM_PROFILE || '',
     vectorProfile: process.env.STHSTART_VECTOR_PROFILE || '',
     imageProfile: process.env.STHSTART_IMAGE_PROFILE || '',
   },

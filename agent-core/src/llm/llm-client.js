@@ -31,7 +31,6 @@ function clientOptions(usePublic = config.publicServices.llm && !config.llm.free
   if (usePublic) return {
     baseURL: `${config.publicServices.baseURL}/v1`,
     apiKey: config.publicServices.appToken || 'missing-sthstart-token',
-    defaultHeaders: config.publicServices.llmProfile ? { 'X-SthStart-Profile': config.publicServices.llmProfile } : undefined,
   };
   return {
     baseURL: config.llm.baseURL,
@@ -43,7 +42,7 @@ function getClient() {
   if (!_client) {
     const opts = clientOptions();
     const headers = config.llm.headers;
-    if (headers && Object.keys(headers).length > 0) {
+    if (!config.publicServices.llm && headers && Object.keys(headers).length > 0) {
       opts.defaultHeaders = headers;
     }
     // 每日免费鸡蛋：端点免 Key。SDK 构造时要求 apiKey 非 undefined（用占位符绕过），
@@ -67,6 +66,10 @@ async function createCompletion(params) {
     return await getClient().chat.completions.create(params);
   } catch (error) {
     if (!config.publicServices.llm) throw error;
+    // A response from SthStart is an intentional configuration/provider
+    // result and must be shown to the user. Only a transport-level outage of
+    // the local public service may fall back to Linshe's legacy provider.
+    if (typeof error?.status === 'number') throw error;
     console.warn(`[sthstart] public LLM unavailable before response; falling back to Linshe provider: ${error.message}`);
     return getLegacyClient().chat.completions.create(params);
   }

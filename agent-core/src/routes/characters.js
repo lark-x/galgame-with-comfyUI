@@ -2,6 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
+import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getGlobalRule, repairFtsIndex } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
@@ -153,6 +154,122 @@ router.post('/migrate-short-prompts', (_req, res) => {
 // GET /api/characters/migrate-short-prompts — 查询迁移状态
 router.get('/migrate-short-prompts', (_req, res) => {
   res.json(getMigrationStatus());
+});
+
+function publicCharacterHeaders() {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${config.publicServices.appToken}` };
+}
+
+async function publicCharacterRequest(pathname, init = {}) {
+  if (!config.publicServices.appToken) throw new Error('主页面尚未为邻舍配置公共服务凭据');
+  const response = await fetch(`${config.publicServices.baseURL}/api/v1/${pathname}`, {
+    ...init,
+    headers: { ...publicCharacterHeaders(), ...(init.headers || {}) },
+    signal: AbortSignal.timeout(15000),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.message || body.error || `公共角色服务 HTTP ${response.status}`);
+  return body;
+}
+
+const promptHash = value => createHash('sha256').update(String(value || '')).digest('hex');
+
+function syncPublicRelationships(db, sourceCharacterId, relationships = []) {
+  const active = new Set();
+  for (const relation of relationships) {
+    const from = db.prepare('SELECT id FROM characters WHERE source_character_id=?').get(relation.fromCharacterId);
+    const to = db.prepare('SELECT id FROM characters WHERE source_character_id=?').get(relation.toCharacterId);
+    if (!from || !to) continue;
+    active.add(String(relation.id));
+    const text = [relation.relationType && `【${relation.relationType}】`, relation.description].filter(Boolean).join(' ');
+    const linked = db.prepare('SELECT local_relationship_id FROM public_character_relationship_links WHERE source_relationship_id=?').get(relation.id);
+    if (linked) db.prepare('UPDATE character_relationships SET relationship_text=? WHERE id=?').run(text, linked.local_relationship_id);
+    else {
+      // 用户已经手工创建的同向关系优先，公共资料不会覆盖它。
+      if (db.prepare('SELECT 1 FROM character_relationships WHERE from_character_id=? AND to_character_id=?').get(from.id, to.id)) continue;
+      const result = db.prepare('INSERT INTO character_relationships(from_character_id,to_character_id,relationship_text) VALUES (?,?,?)').run(from.id, to.id, text);
+      db.prepare('INSERT INTO public_character_relationship_links VALUES (?,?,?,?)').run(relation.id, relation.fromCharacterId, relation.toCharacterId, result.lastInsertRowid);
+    }
+  }
+  const stale = db.prepare('SELECT source_relationship_id,local_relationship_id FROM public_character_relationship_links WHERE source_from_character_id=? OR source_to_character_id=?').all(sourceCharacterId, sourceCharacterId);
+  for (const item of stale) if (!active.has(String(item.source_relationship_id))) {
+    db.prepare('DELETE FROM character_relationships WHERE id=?').run(item.local_relationship_id);
+    db.prepare('DELETE FROM public_character_relationship_links WHERE source_relationship_id=?').run(item.source_relationship_id);
+  }
+}
+
+async function importPublicAvatar(avatarUrl, localId) {
+  if (!avatarUrl) return null;
+  try {
+    const response = await fetch(`${config.publicServices.baseURL}${avatarUrl}`, { headers: publicCharacterHeaders(), signal: AbortSignal.timeout(15000) });
+    if (!response.ok) return null;
+    const contentType = response.headers.get('content-type') || 'image/png';
+    const extension = contentType.includes('jpeg') ? 'jpg' : contentType.includes('webp') ? 'webp' : contentType.includes('gif') ? 'gif' : 'png';
+    const projectRoot = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
+    const avatarsDir = path.join(projectRoot, 'data', 'avatars'); fs.mkdirSync(avatarsDir, { recursive: true });
+    const filename = `avatar_${localId}_public.${extension}`; fs.writeFileSync(path.join(avatarsDir, filename), Buffer.from(await response.arrayBuffer()));
+    return `/avatars/${filename}`;
+  } catch { return null; }
+}
+
+// GET /api/characters/public-library — 可招募的 SthStart 发布角色
+router.get('/public-library', async (_req, res) => {
+  try {
+    const remote = await publicCharacterRequest('characters');
+    const local = getDb().prepare(`SELECT id,source_character_id,source_character_version,source_prompt_hash,base_prompt FROM characters WHERE source_character_id IS NOT NULL`).all();
+    const links = new Map(local.map(item => [item.source_character_id, item]));
+    res.json({ characters: (remote.items || []).map(item => {
+      const linked = links.get(String(item.id));
+      return { ...item, local_id: linked?.id || null, imported_version: linked?.source_character_version || null, update_available: Boolean(linked && Number(item.latest_version) > Number(linked.source_character_version || 0)), local_modified: Boolean(linked && promptHash(linked.base_prompt) !== linked.source_prompt_hash) };
+    }) });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+// POST /api/characters/import-public — 从公共库招募一个发布版本
+router.post('/import-public', async (req, res) => {
+  const characterId = String(req.body?.characterId || '').trim();
+  if (!characterId) return res.status(400).json({ error: 'characterId is required' });
+  try {
+    const detail = await publicCharacterRequest(`characters/${encodeURIComponent(characterId)}${req.body?.version ? `?version=${Number(req.body.version)}` : ''}`);
+    const snapshot = detail.version;
+    const draft = snapshot?.data || {};
+    const basePrompt = snapshot?.compiledLinshePrompt || '';
+    if (!basePrompt) return res.status(400).json({ error: '公共角色版本缺少邻舍人格内容' });
+    const db = getDb();
+    if (db.prepare('SELECT id FROM characters WHERE source_character_id = ?').get(characterId)) return res.status(409).json({ error: '该公共角色已经招募' });
+    const stem = String(draft.englishName || detail.slug || `sth_${characterId.slice(0, 8)}`).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || `sth_${Date.now()}`;
+    let name = stem; let suffix = 2;
+    while (db.prepare('SELECT 1 FROM characters WHERE name=?').get(name)) name = `${stem}_${suffix++}`;
+    const shortPrompt = cropPersonalityForEmotion(basePrompt, draft.displayName || detail.display_name || name);
+    const result = db.prepare(`INSERT INTO characters(name,display_name,base_prompt,short_prompt,emotion_baseline,source_character_id,source_character_version,source_prompt_hash) VALUES (?,?,?,?,?,?,?,?)`).run(name, draft.displayName || detail.display_name || name, basePrompt, shortPrompt, '{"valence":0.5,"arousal":0.5,"dominance":0.5}', characterId, snapshot.version, promptHash(basePrompt));
+    const localId = String(result.lastInsertRowid);
+    await publicCharacterRequest('app-characters', { method: 'POST', body: JSON.stringify({ characterId, version: snapshot.version, localId }) });
+    syncPublicRelationships(db, characterId, snapshot.relationships || detail.relationships || []);
+    const avatarPath = await importPublicAvatar(detail.avatar_url, localId);
+    if (avatarPath) db.prepare('UPDATE characters SET avatar_path=? WHERE id=?').run(avatarPath, result.lastInsertRowid);
+    refreshCharSearch();
+    res.status(201).json({ id: result.lastInsertRowid, display_name: draft.displayName || detail.display_name, source_version: snapshot.version });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+// POST /api/characters/:id/update-public — 确认后升级静态人设，保留聊天与运行状态
+router.post('/:id/update-public', async (req, res) => {
+  const db = getDb();
+  const local = db.prepare(`SELECT id,base_prompt,source_character_id,source_character_version,source_prompt_hash FROM characters WHERE id=?`).get(req.params.id);
+  if (!local?.source_character_id) return res.status(404).json({ error: '该角色不是从公共角色库导入的' });
+  const locallyModified = promptHash(local.base_prompt) !== local.source_prompt_hash;
+  if (locallyModified && !req.body?.force) return res.status(409).json({ error: 'local_character_modified', message: '邻舍中的人格已被修改，确认覆盖后才能升级。' });
+  try {
+    const detail = await publicCharacterRequest(`characters/${encodeURIComponent(local.source_character_id)}`);
+    const snapshot = detail.version; const draft = snapshot.data || {}; const basePrompt = snapshot.compiledLinshePrompt;
+    db.prepare(`UPDATE characters SET display_name=?,base_prompt=?,short_prompt=?,source_character_version=?,source_prompt_hash=? WHERE id=?`).run(draft.displayName || detail.display_name, basePrompt, cropPersonalityForEmotion(basePrompt, draft.displayName || detail.display_name), snapshot.version, promptHash(basePrompt), local.id);
+    await publicCharacterRequest('app-characters', { method: 'POST', body: JSON.stringify({ characterId: local.source_character_id, version: snapshot.version, localId: String(local.id) }) });
+    syncPublicRelationships(db, local.source_character_id, snapshot.relationships || detail.relationships || []);
+    const avatarPath = await importPublicAvatar(detail.avatar_url, local.id);
+    if (avatarPath) db.prepare('UPDATE characters SET avatar_path=? WHERE id=?').run(avatarPath, local.id);
+    refreshCharSearch();
+    res.json({ ok: true, source_version: snapshot.version, previous_version: local.source_character_version });
+  } catch (err) { res.status(502).json({ error: err.message }); }
 });
 
 // PUT /api/characters/:id — 更新角色

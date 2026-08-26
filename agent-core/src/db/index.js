@@ -614,6 +614,9 @@ function initSchema(db) {
   // 迁移: 群聊系统 — raw_messages/messages 新增 speaker_character_id 列
   migrateGroupChatSchema(db);
 
+  // 迁移: SthStart 公共角色库来源信息（仅描述静态人设版本，不触碰角色运行状态）
+  migratePublicCharacterSource(db);
+
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
   // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）
   try {
@@ -669,6 +672,20 @@ function initSchema(db) {
       throw writeErr;
     }
   }
+}
+
+function migratePublicCharacterSource(db) {
+  const columns = new Set(db.prepare(`PRAGMA table_info(characters)`).all().map(c => c.name));
+  if (!columns.has('source_character_id')) db.exec(`ALTER TABLE characters ADD COLUMN source_character_id TEXT`);
+  if (!columns.has('source_character_version')) db.exec(`ALTER TABLE characters ADD COLUMN source_character_version INTEGER`);
+  if (!columns.has('source_prompt_hash')) db.exec(`ALTER TABLE characters ADD COLUMN source_prompt_hash TEXT`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_characters_source_character ON characters(source_character_id) WHERE source_character_id IS NOT NULL`);
+  db.exec(`CREATE TABLE IF NOT EXISTS public_character_relationship_links (
+    source_relationship_id TEXT PRIMARY KEY,
+    source_from_character_id TEXT NOT NULL,
+    source_to_character_id TEXT NOT NULL,
+    local_relationship_id INTEGER NOT NULL UNIQUE REFERENCES character_relationships(id) ON DELETE CASCADE
+  )`);
 }
 
 /**

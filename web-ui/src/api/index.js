@@ -63,6 +63,28 @@ export async function createCharacter(data) {
   return res.json()
 }
 
+export async function listPublicCharacters() {
+  const res = await fetch(`${BASE}/characters/public-library`)
+  return res.json()
+}
+
+export async function importPublicCharacter(characterId, version) {
+  const res = await fetch(`${BASE}/characters/import-public`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId, version }),
+  })
+  return res.json()
+}
+
+export async function updatePublicCharacter(localId, force = false) {
+  const res = await fetch(`${BASE}/characters/${localId}/update-public`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force }),
+  })
+  const body = await res.json()
+  return { ...body, status: res.status }
+}
+
 export async function deleteCharacter(id) {
   const res = await fetch(`${BASE}/characters/${id}`, { method: 'DELETE' })
   return res.json()

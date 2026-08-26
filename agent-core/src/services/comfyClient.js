@@ -86,6 +86,9 @@ function startObjectInfoPolling() {
 
   poll(); // 立即尝试一次
   pollingTimer = setInterval(poll, 30_000);
+  // ComfyUI is optional: this background probe must never keep Linshe or its
+  // test process alive by itself when the image engine is offline.
+  pollingTimer.unref?.();
 }
 
 // 模块加载时启动轮询

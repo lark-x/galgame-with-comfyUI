@@ -201,7 +201,9 @@
 
             <!-- 步骤 0：输入描述 -->
             <div v-if="recruit.step === 'input'" class="modal-body" style="position:relative;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:14px;padding:18px;margin:0 20px 20px">
-              <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名+IP），也可以是原创设定。</p>
+              <div class="recruit-source-tabs"><button :class="{ active: recruit.mode === 'create' }" @click="recruit.mode = 'create'">现场招募</button><button :class="{ active: recruit.mode === 'library' }" @click="openPublicLibrary">公共角色库</button></div>
+              <p v-if="recruit.mode === 'create'" class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名+IP），也可以是原创设定。</p>
+              <template v-if="recruit.mode === 'create'">
               <textarea
                 v-model="recruit.desc"
                 class="fi recruit-textarea"
@@ -226,6 +228,19 @@
                 </button>
               </div>
 <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+              </template>
+              <div v-else class="public-character-library">
+                <p class="modal-hint">这里只显示主页面已经发布的角色。后续发布新版本时，邻舍会提示升级。</p>
+                <div v-if="recruit.libraryLoading" class="public-library-empty">正在读取公共角色库…</div>
+                <div v-else-if="!recruit.library.length" class="public-library-empty">暂无已发布角色，或公共服务尚未连接。</div>
+                <div v-for="item in recruit.library" :key="item.id" class="public-character-row">
+                  <div><strong>{{ item.display_name }}</strong><span>v{{ item.latest_version }}<template v-if="item.imported_version"> · 已导入 v{{ item.imported_version }}</template></span></div>
+                  <button v-if="!item.local_id" class="btn-primary" :disabled="recruit.saving" @click="importFromPublic(item)">招募</button>
+                  <button v-else-if="item.update_available" class="btn-primary" :disabled="recruit.saving" @click="upgradeFromPublic(item)">升级</button>
+                  <span v-else class="public-character-current">已同步</span>
+                </div>
+                <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+              </div>
               <!-- 招募加载遮罩 -->
               <div v-if="recruit.loading" class="scan-overlay">
                 <div class="scan-line"></div>
@@ -687,11 +702,14 @@ function cancelEditPersona() {
 const recruit = reactive({
   show: false,
   step: 'input',   // 'input' | 'preview'
+  mode: 'create',
   desc: '',
   loading: false,
   saving: false,
   error: '',
   result: null,    // 生成结果
+  library: [],
+  libraryLoading: false,
 })
 
 // 招募加载提示语轮播
@@ -735,11 +753,55 @@ function showToast(message, type = 'info') {
 function openRecruit() {
   recruit.show = true
   recruit.step = 'input'
+  recruit.mode = 'create'
   recruit.desc = ''
   recruit.error = ''
   recruit.result = null
   recruit.loading = false
   recruit.saving = false
+}
+
+async function openPublicLibrary() {
+  recruit.mode = 'library'
+  recruit.error = ''
+  recruit.libraryLoading = true
+  try {
+    const result = await api.listPublicCharacters()
+    if (result.error) throw new Error(result.error)
+    recruit.library = result.characters || []
+  } catch (err) {
+    recruit.error = '公共角色库不可用：' + (err.message || '网络错误')
+    recruit.library = []
+  } finally { recruit.libraryLoading = false }
+}
+
+async function importFromPublic(item) {
+  recruit.saving = true; recruit.error = ''
+  try {
+    const result = await api.importPublicCharacter(item.id, item.latest_version)
+    if (result.error) throw new Error(result.error)
+    await chat.loadCharacters(); await openPublicLibrary()
+    showToast(`已从公共角色库招募「${item.display_name}」`, 'success')
+  } catch (err) { recruit.error = '招募失败：' + (err.message || '网络错误') }
+  finally { recruit.saving = false }
+}
+
+async function upgradeFromPublic(item) {
+  const ok = await confirmFn({ title: '升级角色资料', message: `将「${item.display_name}」从 v${item.imported_version} 升级到 v${item.latest_version}。聊天、记忆、好感和日程不会改变。`, okText: '确认升级' })
+  if (!ok) return
+  recruit.saving = true; recruit.error = ''
+  try {
+    let result = await api.updatePublicCharacter(item.local_id)
+    if (result.error === 'local_character_modified') {
+      const overwrite = await confirmFn({ title: '邻舍人设存在本地修改', message: '升级会覆盖邻舍里手动修改的人格内容，但不会清除聊天、记忆和好感。是否继续？', okText: '覆盖并升级', danger: true })
+      if (!overwrite) return
+      result = await api.updatePublicCharacter(item.local_id, true)
+    }
+    if (result.error) throw new Error(result.message || result.error)
+    await chat.loadCharacters(); await openPublicLibrary()
+    showToast(`「${item.display_name}」已升级到 v${result.source_version}`, 'success')
+  } catch (err) { recruit.error = '升级失败：' + (err.message || '网络错误') }
+  finally { recruit.saving = false }
 }
 
 function closeRecruit() {
@@ -2130,6 +2192,7 @@ onMounted(async () => {
 }
 
 .modal-hint { font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.5; }
+.recruit-source-tabs { display: inline-flex; gap: 3px; margin-bottom: 14px; padding: 3px; border-radius: 11px; background: rgba(0,0,0,.045); }.recruit-source-tabs button { padding: 7px 13px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 12px; }.recruit-source-tabs button.active { background: var(--glass-bg); color: var(--accent); box-shadow: 0 2px 9px rgba(80,55,40,.08); font-weight: 600; }.public-character-library { display: grid; gap: 7px; }.public-character-row { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 11px; background: rgba(255,255,255,.58); }.public-character-row > div { display: grid; gap: 3px; }.public-character-row strong { color: var(--text-primary); font-size: 14px; }.public-character-row span { color: var(--text-secondary); font-size: 11px; }.public-character-row .btn-primary { flex: 0 0 auto; padding: 7px 14px; }.public-character-current { padding-right: 5px; color: var(--text-secondary); }.public-library-empty { padding: 28px 12px; color: var(--text-secondary); font-size: 13px; text-align: center; }
 
 .modal-actions {
   display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;
