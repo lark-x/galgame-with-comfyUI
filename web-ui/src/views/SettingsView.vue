@@ -750,7 +750,7 @@
         </label>
         <div class="sr">
           <span :class="['sd', health?.connected ? 'on' : 'off']"></span>
-          <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
+          <span>{{ health?.connected ? (health.device ? `已连接 · ${health.device}` : '已连接') : `未连接 · ${health?.message || '服务离线或未启动'}` }}</span>
         </div>
         <div class="sa" style="margin-top:12px">
           <button class="btn-primary" :disabled="!connDirty" @click="saveComfyUrl">保存</button>

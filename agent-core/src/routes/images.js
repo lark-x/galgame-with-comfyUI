@@ -31,6 +31,68 @@ const FOLDER_LABEL = {
 
 // 最近一次测试画风成功结果（仅内存，不落盘），供测试细化选取“最近一张图”
 let lastStyleTest = null;
+let lastHealthCheck = null;
+let healthCheckInFlight = null;
+
+export function sanitizeComfyUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.password || parsed.username) {
+      parsed.username = '***';
+      parsed.password = '';
+    }
+    return parsed.toString().replace(/\/+$/, '');
+  } catch {
+    return String(rawUrl || '').replace(/\/+$/, '');
+  }
+}
+
+export async function checkComfyHealthDirect(targetUrl = config.comfyui.url) {
+  const cleanUrl = sanitizeComfyUrl(targetUrl);
+  try {
+    const cres = await fetch(`${targetUrl.replace(/\/+$/, '')}/system_stats`, {
+      signal: AbortSignal.timeout(4000),
+    });
+
+    if (cres.ok) {
+      const stats = await cres.json().catch(() => ({}));
+      return {
+        connected: true,
+        url: cleanUrl,
+        device: stats.devices?.[0]?.name || stats.system?.device || 'unknown',
+        vram_total: stats.devices?.[0]?.vram_total || 0,
+        status: 'online',
+        message: 'ComfyUI 正常运行',
+      };
+    }
+    return {
+      connected: false,
+      url: cleanUrl,
+      status: `http_${cres.status}`,
+      error: 'http_error',
+      message: `ComfyUI 返回 HTTP ${cres.status}`,
+    };
+  } catch (error) {
+    const isTimeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    const isTls = error?.code === 'CERT_HAS_EXPIRED' || error?.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' || (error?.message && /certificate|tls|ssl/i.test(error.message));
+    let code = 'network_unreachable';
+    let message = '无法连接 ComfyUI 服务（未启动或端口不通）';
+    if (isTimeout) {
+      code = 'timeout';
+      message = '连接 ComfyUI 超时（请检查服务负载或地址）';
+    } else if (isTls) {
+      code = 'tls_error';
+      message = 'TLS 证书验证失败（若为自签名证书可在设置中勾选跳过验证）';
+    }
+    return {
+      connected: false,
+      url: cleanUrl,
+      status: code,
+      error: code,
+      message,
+    };
+  }
+}
 
 // ── 相册缓存（避免每次请求都 readdir + stat 阻塞事件循环）──
 const galleryCache = {
@@ -856,26 +918,25 @@ router.delete('/delete', async (req, res) => {
 
 // GET /api/images/comfyui-health — ComfyUI 连接检查
 router.get('/comfyui-health', async (req, res) => {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const cres = await fetch(`${config.comfyui.url}/system_stats`, { signal: controller.signal });
-    clearTimeout(timer);
-
-    if (cres.ok) {
-      const stats = await cres.json().catch(() => ({}));
-      res.json({
-        connected: true,
-        url: config.comfyui.url,
-        device: stats.devices?.[0]?.name || stats.system?.device || 'unknown',
-        vram_total: stats.devices?.[0]?.vram_total || 0,
-      });
-    } else {
-      res.json({ connected: false, url: config.comfyui.url });
-    }
-  } catch {
-    res.json({ connected: false, url: config.comfyui.url });
+  const now = Date.now();
+  // 2 秒缓存防突发风暴
+  if (lastHealthCheck && (now - lastHealthCheck.time < 2000)) {
+    return res.json(lastHealthCheck.data);
   }
+  if (!healthCheckInFlight) {
+    healthCheckInFlight = checkComfyHealthDirect().then((result) => {
+      lastHealthCheck = { time: Date.now(), data: result };
+      healthCheckInFlight = null;
+      return result;
+    }).catch((err) => {
+      healthCheckInFlight = null;
+      const fallback = { connected: false, url: sanitizeComfyUrl(config.comfyui.url), error: 'check_failed', message: err?.message || '检查失败' };
+      lastHealthCheck = { time: Date.now(), data: fallback };
+      return fallback;
+    });
+  }
+  const result = await healthCheckInFlight;
+  res.json(result);
 });
 
 // ── 图片压缩 API ──
