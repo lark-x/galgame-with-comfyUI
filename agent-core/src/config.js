@@ -21,6 +21,7 @@ export const config = {
   dbPath: process.env.DB_PATH || './data/agent.db',
   publicServices: {
     baseURL: (process.env.STHSTART_SERVICE_URL || 'http://127.0.0.1:4100').replace(/\/+$/, ''),
+    portalUrl: (process.env.STHSTART_PORTAL_URL || 'http://127.0.0.1:4173').replace(/\/+$/, ''),
     appToken: process.env.STHSTART_APP_TOKEN || '',
     llm: process.env.STHSTART_PUBLIC_LLM === 'true',
     vector: process.env.STHSTART_PUBLIC_VECTOR === 'true',
@@ -366,11 +367,101 @@ export function getLlmApiKey() {
   return resolveLlmApiKey();
 }
 
+export async function getPublicLlmStatus() {
+  if (!config.publicServices.llm) {
+    return {
+      managed: false,
+      connected: false,
+      status: 'disabled',
+      error: null,
+      text: null,
+      multimodal: null,
+      ready: false,
+      portalUrl: config.publicServices.portalUrl,
+    };
+  }
+  if (!config.publicServices.appToken) {
+    return {
+      managed: true,
+      connected: false,
+      status: 'unreachable',
+      error: '缺少 STHSTART_APP_TOKEN 授权令牌',
+      text: null,
+      multimodal: null,
+      ready: false,
+      portalUrl: config.publicServices.portalUrl,
+    };
+  }
+  try {
+    const res = await fetch(`${config.publicServices.baseURL}/api/v1/app/config`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${config.publicServices.appToken}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      const errPayload = await res.json().catch(() => ({}));
+      const errMsg = errPayload.message || errPayload.error || `HTTP ${res.status}`;
+      return {
+        managed: true,
+        connected: false,
+        status: 'unreachable',
+        error: `SthStart 公共服务返回异常 (${errMsg})`,
+        text: null,
+        multimodal: null,
+        ready: false,
+        portalUrl: config.publicServices.portalUrl,
+      };
+    }
+    const data = await res.json();
+    return {
+      managed: true,
+      connected: true,
+      status: 'connected',
+      error: null,
+      text: data.llm?.text || null,
+      multimodal: data.llm?.multimodal || null,
+      ready: Boolean(data.llm?.ready),
+      portalUrl: config.publicServices.portalUrl,
+    };
+  } catch (error) {
+    const msg = error?.name === 'TimeoutError' ? '连接 SthStart 公共服务超时' : (error?.message || '无法连接 SthStart 公共服务');
+    return {
+      managed: true,
+      connected: false,
+      status: 'unreachable',
+      error: msg,
+      text: null,
+      multimodal: null,
+      ready: false,
+      portalUrl: config.publicServices.portalUrl,
+    };
+  }
+}
+
 export function getLlmConfig() {
+  const isManaged = config.publicServices.llm === true;
+  if (isManaged) {
+    return {
+      managed: true,
+      provider: 'sthstart-public',
+      freeEgg: false,
+      hasApiKey: true,
+      preview: '',
+      baseURL: '',
+      model: '',
+      thinkingMode: 'disabled',
+      headers: {},
+      extraBody: {},
+    };
+  }
   const freeEgg = config.llm.freeEgg === true;
   const key = resolveLlmApiKey();
   const preview = !key ? '' : (key.length <= 12 ? '***' : `${key.slice(0, 5)}...${key.slice(-4)}`);
   return {
+    managed: false,
     provider: config.llm.provider,
     freeEgg,
     // 免费鸡蛋模式下无需 Key 即可用，视为已配置，避免前端"未设置 Key"横幅误报

@@ -259,8 +259,10 @@
       <div class="card">
         <div class="llm-card-header">
           <h3>LLM API 设置</h3>
+          <span v-if="publicLlm.managed" class="managed-badge">SthStart 托管模式</span>
           <!-- 每日免费鸡蛋：点击开启/关闭，免 Key 走 opencode zen 免费端点 -->
           <button
+            v-else
             ref="freeEggBtn"
             type="button"
             :class="['free-egg-btn', { active: freeEgg }]"
@@ -276,7 +278,74 @@
           </button>
         </div>
 
-        <Transition name="egg-page" mode="out-in">
+        <!-- 托管模式面板 -->
+        <div v-if="publicLlm.managed" class="managed-llm-panel">
+          <p class="fd">邻舍当前由 SthStart 公共服务集中托管。模型调用、凭据管理与思考模式均由 SthStart 统一控制。</p>
+
+          <div class="managed-status-box" :class="{ 'is-connected': publicLlm.connected, 'is-unreachable': !publicLlm.connected }">
+            <div class="managed-conn-row">
+              <span class="managed-dot" :class="{ 'dot-online': publicLlm.connected, 'dot-offline': !publicLlm.connected }"></span>
+              <span class="managed-conn-text">{{ publicLlm.connected ? '已连接 SthStart 公共服务底座' : (publicLlm.error || '无法连接 SthStart 公共服务') }}</span>
+            </div>
+
+            <div class="managed-roles-grid">
+              <div class="managed-role-card">
+                <div class="managed-role-header">
+                  <span class="managed-role-label">文本模型 (Text)</span>
+                  <span v-if="publicLlm.text" :class="['managed-role-tag', publicLlm.text.ready ? 'tag-ready' : 'tag-unready']">
+                    {{ publicLlm.text.ready ? '就绪' : '未就绪' }}
+                  </span>
+                  <span v-else class="managed-role-tag tag-missing">未绑定</span>
+                </div>
+                <div class="managed-role-content">
+                  <template v-if="publicLlm.text">
+                    <div class="managed-tpl-name">{{ publicLlm.text.name }} <code class="managed-profile-id font-mono">({{ publicLlm.text.profileId }})</code></div>
+                    <div class="managed-model-name font-mono">模型：{{ publicLlm.text.model || '未指定模型' }}</div>
+                  </template>
+                  <template v-else>
+                    <div class="managed-empty-hint">⚠️ 尚未绑定文本模板，对话功能将不可用</div>
+                  </template>
+                </div>
+              </div>
+
+              <div class="managed-role-card">
+                <div class="managed-role-header">
+                  <span class="managed-role-label">多模态模型 (Multimodal)</span>
+                  <span v-if="publicLlm.multimodal" :class="['managed-role-tag', publicLlm.multimodal.ready ? 'tag-ready' : 'tag-unready']">
+                    {{ publicLlm.multimodal.ready ? '就绪' : '未就绪' }}
+                  </span>
+                  <span v-else class="managed-role-tag tag-optional">未绑定</span>
+                </div>
+                <div class="managed-role-content">
+                  <template v-if="publicLlm.multimodal">
+                    <div class="managed-tpl-name">{{ publicLlm.multimodal.name }} <code class="managed-profile-id font-mono">({{ publicLlm.multimodal.profileId }})</code></div>
+                    <div class="managed-model-name font-mono">模型：{{ publicLlm.multimodal.model || '未指定模型' }}</div>
+                  </template>
+                  <template v-else>
+                    <div class="managed-empty-hint text-muted">未绑定多模态模板（仅支持纯文本交互）</div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="managed-footer-actions">
+            <a
+              :href="(publicLlm.portalUrl || 'http://127.0.0.1:4173') + '/settings/public-services#app-model-routing'"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-primary managed-portal-link"
+            >
+              前往 SthStart 管理公共模型 ↗
+            </a>
+            <span class="managed-notice-text">
+              API 凭据安全保存在系统凭据库中；如需更换模板或修改模型，请在 SthStart 控制台进行配置。
+            </span>
+          </div>
+        </div>
+
+        <!-- 独立模式展示面板 -->
+        <Transition v-else name="egg-page" mode="out-in">
         <div v-if="!freeEgg" key="llm-custom" class="llm-api-switch-body">
         <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口</p>
         <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少</p>
@@ -1171,6 +1240,7 @@ async function removeFavorite(id) {
 
 // ── LLM API ──
 const llmPreview = ref({ provider: 'deepseek', hasApiKey: false, preview: '', model: 'deepseek-chat' })
+const publicLlm = ref({ managed: false, connected: false, ready: false, text: null, multimodal: null, portalUrl: '' })
 const freeEgg = ref(false)
 const llmApiKey = ref('')
 const llmBaseURL = ref('https://api.deepseek.com')
@@ -1691,6 +1761,7 @@ onMounted(async () => {
       disturbSkipWeekends.value = data.disturb.skipWeekends ?? false
     }
     weatherCity.value = data.weather?.city || ''
+    if (data.publicLlm) publicLlm.value = data.publicLlm
     llmPreview.value = { ...data.llm }
     freeEgg.value = data.llm?.freeEgg === true
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
@@ -2793,6 +2864,137 @@ function resetTestPrompts() {
 .sp-btn-small:hover { border-color:var(--accent); }
 
 /* ── LLM API ── */
+.managed-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b83b1b;
+  background: rgba(184, 59, 27, 0.08);
+  border: 1px solid rgba(184, 59, 27, 0.2);
+  padding: 3px 8px;
+  border-radius: 9999px;
+}
+.managed-llm-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.managed-status-box {
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--glass-bg-strong);
+}
+.managed-conn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.managed-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-online {
+  background: #38a169;
+  box-shadow: 0 0 6px rgba(56, 161, 105, 0.5);
+}
+.dot-offline {
+  background: #e53e3e;
+  box-shadow: 0 0 6px rgba(229, 62, 62, 0.5);
+}
+.managed-roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.managed-role-card {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.6);
+}
+.managed-role-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.managed-role-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+.managed-role-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.tag-ready {
+  background: rgba(56, 161, 105, 0.12);
+  color: #276749;
+}
+.tag-unready {
+  background: rgba(229, 62, 62, 0.12);
+  color: #9b2c2c;
+}
+.tag-missing {
+  background: rgba(229, 62, 62, 0.12);
+  color: #9b2c2c;
+}
+.tag-optional {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-secondary);
+}
+.managed-tpl-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+.managed-profile-id {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.managed-model-name {
+  font-size: 12px;
+  color: #b83b1b;
+  margin-top: 4px;
+}
+.managed-empty-hint {
+  font-size: 12px;
+  color: #c53030;
+  line-height: 1.4;
+}
+.managed-empty-opt {
+  color: var(--text-secondary);
+}
+.managed-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+.managed-portal-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  text-decoration: none;
+  font-size: 13px;
+  border-radius: 8px;
+}
+.managed-notice-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 200px;
+  line-height: 1.5;
+}
 .apikey-row { display: flex; gap: 8px; align-items: center; }
 .apikey-row .fi { flex: 1; min-width: 0; }
 .key-status { margin-top: 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; }

@@ -10,6 +10,7 @@ function isDeepseek() {
 }
 
 function providerLabel() {
+  if (config.publicServices.llm) return 'SthStart 公共 LLM';
   const url = config.llm.baseURL || '';
   try {
     return new URL(url).hostname;
@@ -26,8 +27,7 @@ function configuredThinking() {
 // 复用单个 OpenAI 客户端实例，避免每次调用都创建新的 HTTP Agent
 // 频繁创建 client 会实例化底层 undici 连接池，在高并发场景下浪费 FD 和内存
 let _client = null;
-let _legacyClient = null;
-function clientOptions(usePublic = config.publicServices.llm && !config.llm.freeEgg) {
+function clientOptions(usePublic = config.publicServices.llm) {
   if (usePublic) return {
     baseURL: `${config.publicServices.baseURL}/v1`,
     apiKey: config.publicServices.appToken || 'missing-sthstart-token',
@@ -47,37 +47,24 @@ function getClient() {
     }
     // 每日免费鸡蛋：端点免 Key。SDK 构造时要求 apiKey 非 undefined（用占位符绕过），
     // 且值为 null 的请求头会被 SDK 从请求中删除 → 真正不发送 Authorization
-    if (config.llm.freeEgg) {
+    if (!config.publicServices.llm && config.llm.freeEgg) {
       opts.apiKey = 'free-egg';
       opts.defaultHeaders = { Authorization: null, ...(opts.defaultHeaders || {}) };
     }
-    _client = new OpenAI(opts);
+    _client = new OpenAI({
+      ...opts,
+      fetch: (...args) => globalThis.fetch(...args),
+    });
   }
   return _client;
 }
 
-function getLegacyClient() {
-  if (!_legacyClient) _legacyClient = new OpenAI(clientOptions(false));
-  return _legacyClient;
-}
-
 async function createCompletion(params) {
-  try {
-    return await getClient().chat.completions.create(params);
-  } catch (error) {
-    if (!config.publicServices.llm) throw error;
-    // A response from SthStart is an intentional configuration/provider
-    // result and must be shown to the user. Only a transport-level outage of
-    // the local public service may fall back to Linshe's legacy provider.
-    if (typeof error?.status === 'number') throw error;
-    console.warn(`[sthstart] public LLM unavailable before response; falling back to Linshe provider: ${error.message}`);
-    return getLegacyClient().chat.completions.create(params);
-  }
+  return getClient().chat.completions.create(params);
 }
 
 export function resetClient() {
   _client = null;
-  _legacyClient = null;
 }
 
 // ── 免费鸡蛋模型轮换：按 deepseek → MiMo → Hy3 依次请求，每个模型只请求一次；
@@ -208,6 +195,9 @@ async function _chatSyncFreeEgg(messages, opts) {
  * @param {number} opts.retryDelay - 初始重试延迟 ms（默认 1000，指数退避 ×2）
  */
 export async function chatSync(messages, opts = {}) {
+  if (config.publicServices.llm) {
+    return await _chatSyncInner(messages, opts);
+  }
   try {
     if (config.llm.freeEgg) return await _chatSyncFreeEgg(messages, opts);
     return await _chatSyncInner(messages, opts);
@@ -220,12 +210,14 @@ export async function chatSync(messages, opts = {}) {
   }
 }
 
-async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
+async function _chatSyncInner(messages, { model, max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
+  const isManaged = config.publicServices.llm === true;
+  const effectiveModel = isManaged ? (model || 'default') : (model || config.llm.model || 'deepseek-v4-flash');
   try {
   const params = {
-    model,
+    model: effectiveModel,
     messages,
     max_tokens,
   };
@@ -236,16 +228,18 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   if (response_format) {
     params.response_format = response_format;
   }
-  // 全局三态配置默认注入 disabled；选择“不传”时完全省略。
-  // 调用方显式传入 thinking/null 时仍可覆盖全局设置。
-  const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
-  if (effectiveThinking !== null) {
-    params.thinking = effectiveThinking;
-  }
-  // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
-  const extraBody = config.llm.extraBody;
-  if (extraBody && Object.keys(extraBody).length > 0) {
-    Object.assign(params, extraBody);
+  if (!isManaged) {
+    // 全局三态配置默认注入 disabled；选择“不传”时完全省略。
+    // 调用方显式传入 thinking/null 时仍可覆盖全局设置。
+    const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
+    if (effectiveThinking !== null) {
+      params.thinking = effectiveThinking;
+    }
+    // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
+    const extraBody = config.llm.extraBody;
+    if (extraBody && Object.keys(extraBody).length > 0) {
+      Object.assign(params, extraBody);
+    }
   }
 
   // 日志打印时压缩 ANIMA3 模板内容，避免刷屏
@@ -360,6 +354,12 @@ async function* _chatStreamFreeEgg(messages, opts) {
  * @returns {AsyncGenerator<string>}
  */
 export async function* chatStream(messages, opts = {}) {
+  if (config.publicServices.llm) {
+    for await (const delta of _chatStreamInner(messages, opts)) {
+      yield delta;
+    }
+    return;
+  }
   let anyYielded = false;
   try {
     if (config.llm.freeEgg) {
@@ -383,7 +383,7 @@ export async function* chatStream(messages, opts = {}) {
 }
 
 async function* _chatStreamInner(messages, {
-  model = config.llm.model || 'deepseek-v4-flash',
+  model,
   max_tokens = 4096,
   temperature = 0.7,
   thinking,
@@ -391,6 +391,8 @@ async function* _chatStreamInner(messages, {
 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
+  const isManaged = config.publicServices.llm === true;
+  const effectiveModel = isManaged ? (model || 'default') : (model || config.llm.model || 'deepseek-v4-flash');
   let total = '';
 
   try {
@@ -406,28 +408,30 @@ async function* _chatStreamInner(messages, {
     console.log('────────────────────────────────────────────────');
 
     const params = {
-      model,
+      model: effectiveModel,
       messages,
       max_tokens,
       temperature,
       stream: true,
     };
 
-    const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
-    if (effectiveThinking !== null) {
-      params.thinking = effectiveThinking;
-    }
+    if (!isManaged) {
+      const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
+      if (effectiveThinking !== null) {
+        params.thinking = effectiveThinking;
+      }
 
-    // 流式 usage（缓存命中率）：末尾 chunk 携带。仅对官方 API 发送，
-    // 第三方渠道可能不认识 stream_options 直接报错。
-    if (isDeepseek()) {
-      params.stream_options = { include_usage: true };
-    }
+      // 流式 usage（缓存命中率）：末尾 chunk 携带。仅对官方 API 发送，
+      // 第三方渠道可能不认识 stream_options 直接报错。
+      if (isDeepseek()) {
+        params.stream_options = { include_usage: true };
+      }
 
-    // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
-    const extraBody = config.llm.extraBody;
-    if (extraBody && Object.keys(extraBody).length > 0) {
-      Object.assign(params, extraBody);
+      // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
+      const extraBody = config.llm.extraBody;
+      if (extraBody && Object.keys(extraBody).length > 0) {
+        Object.assign(params, extraBody);
+      }
     }
 
     const stream = await createCompletion(params);

@@ -2,7 +2,7 @@
   <!-- API Key 未配置横幅 -->
   <div v-if="!settings.hasApiKey" class="api-key-banner">
     <span class="banner-icon">⚠️</span>
-    <span class="banner-text">尚未配置 API Key，请前往设置页面填写 DeepSeek（或其他兼容）API Key</span>
+    <span class="banner-text">{{ settings.publicLlm?.managed ? (settings.publicLlm?.text?.ready ? '公共 LLM 文本模型已就绪，但多模态模板尚未就绪；如需图文对话，请在 SthStart 控制台补充绑定' : '公共 LLM 尚未就绪或未分配文本模板，请前往设置或 SthStart 控制台检查模型绑定') : '尚未配置 API Key，请前往设置页面填写 DeepSeek（或其他兼容）API Key' }}</span>
     <router-link to="/settings" class="banner-link">前往设置 →</router-link>
   </div>
   <div class="app-layout" :class="{ 'is-mobile': isMobile }">

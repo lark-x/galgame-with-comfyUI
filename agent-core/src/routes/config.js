@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getPublicLlmStatus, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -69,7 +69,8 @@ router.post('/memory/test-reranker', async (req, res) => {
 });
 
 // GET /api/config — 获取全部配置
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
+  const publicLlm = await getPublicLlmStatus();
   res.json({
     comfy: {
       url: config.comfyui.url,
@@ -96,6 +97,7 @@ router.get('/', (req, res) => {
     features: config.features,
     weather: { city: config.weather.city || '' },
     llm: getLlmConfig(),
+    publicLlm,
     llmProfiles: getLlmProfiles(),
     activeLlmProfileId: getActiveProfileId(),
     disturb: {
@@ -235,6 +237,9 @@ router.put('/background-llm-concurrency', (req, res) => {
 
 // PUT /api/config/llm — 更新 LLM 配置
 router.put('/llm', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，LLM 配置由 SthStart 公共服务管理。' });
+  }
   const { apiKey, baseURL, model, thinkingMode, headers, extraBody } = req.body;
   const result = updateLlmConfig({ apiKey, baseURL, model, thinkingMode, headers, extraBody });
   if (!result.ok) {
@@ -256,6 +261,9 @@ router.put('/llm', (req, res) => {
 
 // PUT /api/config/llm/free-egg — 每日免费鸡蛋开关（opencode zen 免费端点，免 Key）
 router.put('/llm/free-egg', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，免费鸡蛋已禁用。' });
+  }
   const { enabled } = req.body;
   if (typeof enabled !== 'boolean') {
     return res.status(400).json({ error: 'enabled must be boolean' });
@@ -268,6 +276,9 @@ router.put('/llm/free-egg', (req, res) => {
 
 // GET /api/config/llm/key — 获取当前 LLM API Key（前端复制用）
 router.get('/llm/key', (_req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ ok: false, error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，密钥由 SthStart 安全凭据库管理。' });
+  }
   const apiKey = getLlmApiKey();
   if (!apiKey) {
     return res.status(404).json({ ok: false, error: '未设置 API Key' });
@@ -277,6 +288,9 @@ router.get('/llm/key', (_req, res) => {
 
 // POST /api/config/llm/models — 从 OpenAI-compatible 接口获取可用模型
 router.post('/llm/models', async (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，模型由 SthStart 公共服务管理。' });
+  }
   const baseURL = String(req.body?.baseURL || config.llm.baseURL || '').trim().replace(/\/+$/, '');
   if (!baseURL) return res.status(400).json({ error: '请先填写 API 地址' });
 
@@ -342,6 +356,9 @@ router.get('/llm/profiles', (req, res) => {
 
 // POST /api/config/llm/profiles — 新增 profile（默认快照当前 LLM 配置，可传字段覆盖）
 router.post('/llm/profiles', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，配置由 SthStart 公共服务管理。' });
+  }
   const { name, ...overrides } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'name is required' });
@@ -352,6 +369,9 @@ router.post('/llm/profiles', (req, res) => {
 
 // DELETE /api/config/llm/profiles/:id — 删除 profile
 router.delete('/llm/profiles/:id', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，配置由 SthStart 公共服务管理。' });
+  }
   const result = deleteLlmProfile(req.params.id);
   if (!result.ok) return res.status(400).json(result);
   resetClient();
@@ -360,6 +380,9 @@ router.delete('/llm/profiles/:id', (req, res) => {
 
 // POST /api/config/llm/profiles/:id/activate — 切换激活 profile
 router.post('/llm/profiles/:id/activate', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，配置由 SthStart 公共服务管理。' });
+  }
   const result = activateLlmProfile(req.params.id);
   if (!result.ok) return res.status(400).json(result);
   resetClient();
@@ -375,6 +398,9 @@ router.post('/llm/profiles/:id/activate', (req, res) => {
 
 // PUT /api/config/llm/profiles/active/sync — 同步当前配置到激活的 profile
 router.put('/llm/profiles/active/sync', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，配置由 SthStart 公共服务管理。' });
+  }
   syncActiveLlmProfile();
   res.json({ ok: true });
 });

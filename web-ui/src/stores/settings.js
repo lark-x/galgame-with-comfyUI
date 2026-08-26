@@ -10,6 +10,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const forceImageGen = ref(false)
   const realtimeAffinityDisplay = ref(false)
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
+  const publicLlm = ref({ managed: false, connected: false, ready: false, text: null, multimodal: null, portalUrl: '' })
   const weatherCity = ref('')
   let loaded = false
 
@@ -36,7 +37,12 @@ export const useSettingsStore = defineStore('settings', () => {
       if (data.features?.realtimeAffinityDisplay !== undefined) {
         realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
       }
-      hasApiKey.value = data.llm?.hasApiKey ?? false
+      if (data.publicLlm) {
+        publicLlm.value = data.publicLlm
+      }
+      hasApiKey.value = data.publicLlm?.managed
+        ? Boolean(data.publicLlm?.text?.ready)
+        : (data.llm?.hasApiKey ?? false)
       weatherCity.value = data.weather?.city || ''
       loaded = true
     } catch {
@@ -77,5 +83,5 @@ export const useSettingsStore = defineStore('settings', () => {
     await api.updateWeatherCity(city)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, weatherCity, loadComfyConfig, setComfySize, setEventSize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity }
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, publicLlm, weatherCity, loadComfyConfig, setComfySize, setEventSize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity }
 })
