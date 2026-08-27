@@ -31,6 +31,7 @@ export const config = {
     imageFallback: process.env.STHSTART_PUBLIC_IMAGE_FALLBACK === 'true',
     vectorProfile: process.env.STHSTART_VECTOR_PROFILE || '',
     imageProfile: process.env.STHSTART_IMAGE_PROFILE || '',
+    generationPurpose: process.env.STHSTART_GENERATION_PURPOSE || 'linshe-chat-image',
   },
   llm: {
     provider: process.env.LLM_PROVIDER || 'deepseek',

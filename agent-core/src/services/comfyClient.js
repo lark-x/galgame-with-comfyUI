@@ -468,16 +468,10 @@ export async function submitWorkflow(guiWorkflow, onProgress) {
         code: 'sthstart_public_not_configured',
       });
     }
-    try {
-      return await submitPublicWorkflow(guiWorkflow, onProgress);
-    } catch (error) {
-      if (error?.acceptedPublicTask) throw error;
-      if (error?.allowDirectFallback && config.publicServices.imageFallback) {
-        console.warn(`[sthstart-public-image] service unavailable before acceptance; temporary direct fallback enabled: ${error.message}`);
-      } else {
-        throw error;
-      }
-    }
+    // Managed mode is deliberately single-homed: a public-service failure is
+    // visible to the caller and must never submit the same request to local
+    // ComfyUI, even when the old escape-hatch flag is present.
+    return await submitPublicWorkflow(guiWorkflow, onProgress);
   }
   const clientId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const apiPrompt = guiToApi(guiWorkflow);
@@ -546,17 +540,22 @@ function publicImageError(message, { code = 'sthstart_public_image_error', allow
 
 export async function submitPublicWorkflow(guiWorkflow, onProgress) {
   const serviceBase = config.publicServices.baseURL;
+  const business = extractPublicGenerationInputs(guiWorkflow);
   const headers = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${config.publicServices.appToken}`,
     'Idempotency-Key': `linshe-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`,
-    ...(config.publicServices.imageProfile ? { 'X-SthStart-Profile': config.publicServices.imageProfile } : {}),
   };
   let accepted;
   let response;
   try {
-    response = await fetch(`${serviceBase}/api/v1/images/tasks`, {
-      method: 'POST', headers, body: JSON.stringify({ workflow: guiToApi(guiWorkflow) }),
+    response = await fetch(`${serviceBase}/api/v1/generation/tasks`, {
+      method: 'POST', headers, body: JSON.stringify({
+        purpose: config.publicServices.generationPurpose,
+        inputs: business.inputs,
+        ...(business.seed === null ? {} : { seed: business.seed }),
+        priority: 'normal',
+      }),
     });
   } catch (error) {
     throw publicImageError(`无法连接 SthStart 公共图片服务: ${error?.message || 'network error'}`, {
@@ -589,11 +588,12 @@ export async function submitPublicWorkflow(guiWorkflow, onProgress) {
     let response;
     let task;
     try {
-      response = await fetch(`${serviceBase}/api/v1/images/tasks/${encodeURIComponent(accepted.id)}`, {
+      response = await fetch(`${serviceBase}/api/v1/generation/tasks/${encodeURIComponent(accepted.id)}`, {
         headers: { Authorization: `Bearer ${config.publicServices.appToken}` },
       });
       if (!response.ok) {
-        throw new Error(`SthStart image task lookup returned ${response.status}`);
+        const detail = await response.text().catch(() => '');
+        throw new Error(`SthStart generation task lookup returned ${response.status}${detail ? `: ${detail.slice(0, 240)}` : ''}`);
       }
       task = await response.json();
     } catch (error) {
@@ -602,15 +602,14 @@ export async function submitPublicWorkflow(guiWorkflow, onProgress) {
         acceptedPublicTask: true,
       });
     }
-    if (task.status === 'complete' || task.status === 'succeeded') {
+    if (task.status === 'succeeded') {
       const images = [];
       for (const artifact of task.artifacts || []) {
         const reference = toArtifactImageReference({
-          artifactId: artifact.id,
-          url: `/api/images/artifacts/${encodeURIComponent(String(artifact.id))}`,
-          contentType: artifact.content_type || artifact.contentType,
-          filename: artifact.filename || artifact.id,
-          byteSize: artifact.byte_size ?? artifact.byteSize,
+          artifactId: artifact.artifactId,
+          contentType: artifact.contentType,
+          filename: artifact.outputName || artifact.artifactId,
+          byteSize: artifact.byteSize,
         });
         if (reference) images.push(reference);
       }
@@ -624,8 +623,8 @@ export async function submitPublicWorkflow(guiWorkflow, onProgress) {
       console.log(`[sthstart-public-image] completed task ${accepted.id} with ${images.length} artifact reference(s)`);
       return { images, promptId: accepted.id, source: 'sthstart-public' };
     }
-    if (task.status === 'failed' || task.status === 'cancelled') {
-      throw publicImageError(task.error || `SthStart image task ${task.status}`, {
+    if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'abandoned') {
+      throw publicImageError(task.errorMessage || `SthStart generation task ${task.status}`, {
         code: 'sthstart_public_task_failed',
         acceptedPublicTask: true,
       });
@@ -636,6 +635,56 @@ export async function submitPublicWorkflow(guiWorkflow, onProgress) {
     code: 'sthstart_public_task_timeout',
     acceptedPublicTask: true,
   });
+}
+
+const PUBLIC_NODE_TITLES = {
+  artist: '画师串',
+  quality: '质量提示词',
+  width: '图片的宽',
+  height: '图片的长',
+  prompt: '画面描述',
+};
+
+function publicNodeByTitle(workflow, title) {
+  if (!workflow || !Array.isArray(workflow.nodes)) return null;
+  return workflow.nodes.find((node) => node?.title === title) || null;
+}
+
+function publicWidgetValue(node) {
+  return Array.isArray(node?.widgets_values) ? node.widgets_values[0] : undefined;
+}
+
+function publicTextValue(node) {
+  const value = publicWidgetValue(node);
+  return typeof value === 'string' ? value.trim() : value == null ? '' : String(value).trim();
+}
+
+function publicNumberValue(node, fallback) {
+  const value = Number(publicWidgetValue(node));
+  return Number.isFinite(value) ? Math.round(value) : fallback;
+}
+
+function extractPublicGenerationInputs(workflow) {
+  const prompt = publicTextValue(publicNodeByTitle(workflow, PUBLIC_NODE_TITLES.prompt));
+  if (!prompt || prompt === '请输入画面描述') {
+    throw publicImageError('公共图片工作流缺少有效的画面描述', { code: 'sthstart_public_prompt_required' });
+  }
+  const inputs = {
+    prompt,
+    width: Math.max(64, Math.min(4096, publicNumberValue(publicNodeByTitle(workflow, PUBLIC_NODE_TITLES.width), config.comfyui.width))),
+    height: Math.max(64, Math.min(4096, publicNumberValue(publicNodeByTitle(workflow, PUBLIC_NODE_TITLES.height), config.comfyui.height))),
+  };
+  const artist = publicTextValue(publicNodeByTitle(workflow, PUBLIC_NODE_TITLES.artist));
+  const qualityPrompt = publicTextValue(publicNodeByTitle(workflow, PUBLIC_NODE_TITLES.quality));
+  if (artist) inputs.artist = artist;
+  if (qualityPrompt) inputs.qualityPrompt = qualityPrompt;
+  const negativeNode = workflow?.nodes?.find((node) => node?.title === '负面提示词');
+  const negativePrompt = publicTextValue(negativeNode);
+  if (negativePrompt) inputs.negativePrompt = negativePrompt;
+  const sampler = workflow?.nodes?.find((node) => node?.type === 'KSampler' || node?.type === 'KSamplerAdvanced');
+  const rawSeed = Array.isArray(sampler?.widgets_values) ? sampler.widgets_values[0] : undefined;
+  const seed = Number(rawSeed);
+  return { inputs, seed: Number.isSafeInteger(seed) && seed >= 0 ? seed : null };
 }
 
 // ── WebSocket 实时进度 + 结果监听 ──

@@ -3,7 +3,17 @@ import test from 'node:test';
 import { config } from '../src/config.js';
 import { submitPublicWorkflow, submitWorkflow } from '../src/services/comfyClient.js';
 
-const WORKFLOW = { nodes: [], links: [] };
+const WORKFLOW = {
+  nodes: [
+    { id: 1, type: 'PrimitiveString', title: '画面描述', widgets_values: ['a rainy station at dusk'], inputs: [{ name: 'value', widget: { name: 'value' } }] },
+    { id: 2, type: 'PrimitiveInt', title: '图片的宽', widgets_values: [768], inputs: [{ name: 'value', widget: { name: 'value' } }] },
+    { id: 3, type: 'PrimitiveInt', title: '图片的长', widgets_values: [512], inputs: [{ name: 'value', widget: { name: 'value' } }] },
+    { id: 4, type: 'PrimitiveString', title: '画师串', widgets_values: ['@test'], inputs: [{ name: 'value', widget: { name: 'value' } }] },
+    { id: 5, type: 'PrimitiveString', title: '质量提示词', widgets_values: ['best quality'], inputs: [{ name: 'value', widget: { name: 'value' } }] },
+    { id: 6, type: 'KSampler', widgets_values: [12345, 'fixed', 20, 5, 'euler', 'normal', 1], inputs: [] },
+  ],
+  links: [],
+};
 
 function withManagedImage(t, { fallback = false } = {}) {
   const previous = {
@@ -11,6 +21,7 @@ function withManagedImage(t, { fallback = false } = {}) {
     imageFallback: config.publicServices.imageFallback,
     appToken: config.publicServices.appToken,
     baseURL: config.publicServices.baseURL,
+    generationPurpose: config.publicServices.generationPurpose,
     fetch: globalThis.fetch,
   };
   config.publicServices.image = true;
@@ -22,6 +33,7 @@ function withManagedImage(t, { fallback = false } = {}) {
     config.publicServices.imageFallback = previous.imageFallback;
     config.publicServices.appToken = previous.appToken;
     config.publicServices.baseURL = previous.baseURL;
+    config.publicServices.generationPurpose = previous.generationPurpose;
     globalThis.fetch = previous.fetch;
   });
 }
@@ -31,15 +43,19 @@ test('public image completion stores central artifact references without downloa
   const calls = [];
   globalThis.fetch = async (input, init) => {
     const url = String(input);
-    calls.push({ url, method: init?.method || 'GET' });
-    if (url.endsWith('/api/v1/images/tasks')) {
+    calls.push({ url, method: init?.method || 'GET', body: init?.body });
+    if (url.endsWith('/api/v1/generation/tasks')) {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.purpose, 'linshe-chat-image');
+      assert.deepEqual(body.inputs, { prompt: 'a rainy station at dusk', width: 768, height: 512, artist: '@test', qualityPrompt: 'best quality' });
+      assert.equal('workflow' in body, false);
       return Response.json({ id: 'task-12345678', status: 'accepted' }, { status: 202 });
     }
-    if (url.endsWith('/api/v1/images/tasks/task-12345678')) {
+    if (url.endsWith('/api/v1/generation/tasks/task-12345678')) {
       return Response.json({
         id: 'task-12345678',
-        status: 'complete',
-        artifacts: [{ id: 'artifact-12345678', url: 'https://untrusted.example/leak.png', filename: 'public.png', content_type: 'image/png', byte_size: 42 }],
+        status: 'succeeded',
+        artifacts: [{ artifactId: 'artifact-12345678', url: 'https://untrusted.example/leak.png', outputName: 'public.png', contentType: 'image/png', byteSize: 42, mediaKind: 'image' }],
       });
     }
     throw new Error(`unexpected request: ${url}`);
@@ -63,8 +79,8 @@ test('a public HTTP rejection never falls through to local ComfyUI', async (t) =
   let directCalls = 0;
   globalThis.fetch = async (input) => {
     const url = String(input);
-    if (url.endsWith('/api/v1/images/tasks')) {
-      return Response.json({ error: 'image_unavailable' }, { status: 503 });
+    if (url.endsWith('/api/v1/generation/tasks')) {
+      return Response.json({ error: 'generation_unavailable' }, { status: 503 });
     }
     if (url.endsWith('/api/prompt')) directCalls += 1;
     throw new Error(`unexpected request: ${url}`);
@@ -82,7 +98,7 @@ test('a received but malformed public response never falls through to local Comf
   let directCalls = 0;
   globalThis.fetch = async (input) => {
     const url = String(input);
-    if (url.endsWith('/api/v1/images/tasks')) return new Response('{"accepted":true}', { status: 202, headers: { 'content-type': 'application/json' } });
+    if (url.endsWith('/api/v1/generation/tasks')) return new Response('{"accepted":true}', { status: 202, headers: { 'content-type': 'application/json' } });
     if (url.endsWith('/api/prompt')) directCalls += 1;
     throw new Error(`unexpected request: ${url}`);
   };
@@ -94,12 +110,12 @@ test('a received but malformed public response never falls through to local Comf
   assert.equal(directCalls, 0);
 });
 
-test('a public network failure does not use local ComfyUI unless the explicit fallback is enabled', async (t) => {
+test('a public network failure never uses local ComfyUI even when the legacy fallback flag is set', async (t) => {
   withManagedImage(t, { fallback: false });
   let directCalls = 0;
   globalThis.fetch = async (input) => {
     const url = String(input);
-    if (url.endsWith('/api/v1/images/tasks')) throw new Error('connect ECONNREFUSED');
+    if (url.endsWith('/api/v1/generation/tasks')) throw new Error('connect ECONNREFUSED');
     if (url.endsWith('/api/prompt')) directCalls += 1;
     throw new Error(`unexpected request: ${url}`);
   };
@@ -111,31 +127,28 @@ test('a public network failure does not use local ComfyUI unless the explicit fa
   assert.equal(directCalls, 0);
 });
 
-test('the temporary pre-acceptance fallback is observable and only applies to a network failure', async (t) => {
+test('managed image generation does not silently fall back to local ComfyUI', async (t) => {
   withManagedImage(t, { fallback: true });
   let directCalls = 0;
   globalThis.fetch = async (input) => {
     const url = String(input);
-    if (url.endsWith('/api/v1/images/tasks')) throw new Error('connect ECONNREFUSED');
-    if (url.endsWith('/api/prompt')) {
-      directCalls += 1;
-      return new Response('local ComfyUI unavailable', { status: 503 });
-    }
+    if (url.endsWith('/api/v1/generation/tasks')) throw new Error('connect ECONNREFUSED');
+    if (url.endsWith('/api/prompt')) directCalls += 1;
     throw new Error(`unexpected request: ${url}`);
   };
 
-  await assert.rejects(() => submitWorkflow(WORKFLOW), /ComfyUI returned 503/);
-  assert.equal(directCalls, 1);
+  await assert.rejects(() => submitWorkflow(WORKFLOW), (error) => error.code === 'sthstart_public_unavailable');
+  assert.equal(directCalls, 0);
 });
 
 test('a public task lookup failure is marked accepted and cannot be retried as a new task', async (t) => {
   withManagedImage(t);
   globalThis.fetch = async (input) => {
     const url = String(input);
-    if (url.endsWith('/api/v1/images/tasks')) {
+    if (url.endsWith('/api/v1/generation/tasks')) {
       return Response.json({ id: 'task-accepted-1', status: 'accepted' }, { status: 202 });
     }
-    if (url.endsWith('/api/v1/images/tasks/task-accepted-1')) {
+    if (url.endsWith('/api/v1/generation/tasks/task-accepted-1')) {
       return new Response('gateway timeout', { status: 503 });
     }
     throw new Error(`unexpected request: ${url}`);
