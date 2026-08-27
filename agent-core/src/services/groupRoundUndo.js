@@ -1,16 +1,10 @@
 import { getDb } from '../db/index.js';
 import { rollbackMemoriesFromRawId } from './memory/memoryRepository.js';
 import { deleteImageFileByUrl } from './imagePaths.js';
+import { imageIdentity, parseImageValues } from './imageReferences.js';
 
 function parseImageUrls(value) {
-  if (!value) return [];
-  if (Array.isArray(value)) return value;
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-  } catch {
-    return [];
-  }
+  return parseImageValues(value);
 }
 
 export function inferLastGroupRound(rawsDesc) {
@@ -68,7 +62,12 @@ export async function undoLastGroupRound(groupId) {
     WHERE conversation_id = ? AND raw_id BETWEEN ? AND ?
   `).all(conversationId, round.startRawId, round.endRawId);
   const messageIds = messageRows.map(row => row.id);
-  const imageUrls = [...new Set(messageRows.flatMap(row => parseImageUrls(row.images)))];
+  const imageMap = new Map();
+  for (const value of messageRows.flatMap(row => parseImageUrls(row.images))) {
+    const identity = imageIdentity(value);
+    if (identity) imageMap.set(identity, value);
+  }
+  const imageUrls = [...imageMap.values()];
   const messageIdClause = messageIds.length > 0 ? messageIds.map(() => '?').join(',') : null;
 
   const rolledBackMemories = rollbackMemoriesFromRawId(conversationId, round.startRawId);
@@ -88,7 +87,7 @@ export async function undoLastGroupRound(groupId) {
       WHERE conversation_id = ? AND source_msg_id IS NULL
     `).all(conversationId);
     for (const task of legacyTasks) {
-      if (parseImageUrls(task.output_paths).some(url => imageUrls.includes(url))) linkedTaskIds.add(task.id);
+      if (parseImageUrls(task.output_paths).some(value => imageMap.has(imageIdentity(value)))) linkedTaskIds.add(task.id);
     }
   }
 
@@ -120,9 +119,14 @@ export async function undoLastGroupRound(groupId) {
 
   const state = transaction();
 
+  const remainingImageValues = db.prepare('SELECT images FROM messages WHERE images IS NOT NULL').all()
+    .flatMap(row => parseImageUrls(row.images));
+  const remainingImageIds = new Set(remainingImageValues.map(imageIdentity));
   for (const url of imageUrls) {
-    const stillReferenced = db.prepare(`SELECT 1 FROM messages WHERE images LIKE ? LIMIT 1`).get(`%${url}%`);
-    if (stillReferenced) continue;
+    if (remainingImageIds.has(imageIdentity(url))) continue;
+    // Central artifacts are shared service resources. Removing a local group
+    // message must not delete them; only legacy local files are reclaimed.
+    if (typeof url !== 'string') continue;
     try {
       deleteImageFileByUrl(url);
     } catch (err) {

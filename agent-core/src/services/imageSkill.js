@@ -380,11 +380,15 @@ async function submitWithRetry(rawPrompt, {
         if (onProgress) onProgress({ stage: 'generating', ...p });
       });
       if (result.images.length > 0) {
-        return { success: true, images: result.images, source: 'api', promptId: result.promptId, wfMode };
+        return { success: true, images: result.images, source: result.source || 'api', promptId: result.promptId, wfMode };
       }
       lastResult = result;
     } catch (err) {
       console.error(`[imageSkill] ComfyUI attempt ${attempt + 1} failed:`, err.message);
+      // A public task has already been accepted. Retrying would create a
+      // duplicate public task (or unexpectedly switch engines), so surface the
+      // original failure immediately.
+      if (err?.acceptedPublicTask) throw err;
       lastResult = { success: false, images: [], source: null, error: err.message };
     }
 

@@ -26,6 +26,9 @@ export const config = {
     llm: process.env.STHSTART_PUBLIC_LLM === 'true',
     vector: process.env.STHSTART_PUBLIC_VECTOR === 'true',
     image: process.env.STHSTART_PUBLIC_IMAGE === 'true',
+    // Only a temporary, explicitly enabled escape hatch. In managed mode a
+    // reachable public service rejection must never silently use local ComfyUI.
+    imageFallback: process.env.STHSTART_PUBLIC_IMAGE_FALLBACK === 'true',
     vectorProfile: process.env.STHSTART_VECTOR_PROFILE || '',
     imageProfile: process.env.STHSTART_IMAGE_PROFILE || '',
   },

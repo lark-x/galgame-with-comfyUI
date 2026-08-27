@@ -34,7 +34,7 @@
       <img
         v-for="(img, i) in visibleImages"
         :key="i"
-        :src="img"
+        :src="imageUrl(img)"
         class="moment-img"
         @click="onPreviewImg(i)"
         @error="onImgError(i)"
@@ -163,6 +163,7 @@
 </template>
 
 <script setup>
+import { imageUrl } from '../utils/imageReferences.js'
 import { ref, reactive, computed, nextTick, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'

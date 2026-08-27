@@ -10,6 +10,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, reactive } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
+import { normalizeImages } from '../utils/imageReferences.js'
 
 export const useGroupsStore = defineStore('groups', () => {
   const groups = ref([])
@@ -512,14 +513,14 @@ export const useGroupsStore = defineStore('groups', () => {
     const msgId = data.msg_id
     const m = session.messages.find(m => m.id === msgId)
     if (m) {
-      m.images = data.images || []
+      m.images = normalizeImages(data.images)
       m.genStatus = 'done'
       m.hideImagePending = false
       _setGroupPreview(data, { image: true })
     } else {
       const q = _findMsg(session, msgId)
       if (q) {
-        q.images = JSON.stringify(data.images || [])
+        q.images = JSON.stringify(normalizeImages(data.images))
         q.genStatus = 'done'
         q.hideImagePending = false
       }
@@ -593,8 +594,8 @@ export const useGroupsStore = defineStore('groups', () => {
 
 function parseImages(raw) {
   if (!raw) return []
-  if (Array.isArray(raw)) return raw
-  try { return JSON.parse(raw) || [] } catch { return [] }
+  if (Array.isArray(raw)) return normalizeImages(raw)
+  try { return normalizeImages(JSON.parse(raw) || []) } catch { return [] }
 }
 
 function createGroupImagePlaybackGate() {

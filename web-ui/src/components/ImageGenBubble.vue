@@ -29,9 +29,9 @@
       <template v-for="(img, i) in (msg.images || [])" :key="'img'+i">
         <img
           v-if="!imgError.has(i)"
-          :src="img.url || img.base64"
+          :src="imageUrl(img)"
           class="igb-img"
-          @click="$emit('preview', img.url || img.base64)"
+          @click="$emit('preview', imageUrl(img))"
           @error="onImgError(i)"
           @load="onImgLoad"
         />
@@ -55,6 +55,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useSettingsStore } from '../stores/settings.js'
+import { imageUrl } from '../utils/imageReferences.js'
 
 const settings = useSettingsStore()
 

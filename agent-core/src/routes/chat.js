@@ -22,7 +22,7 @@ import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
-import { saveBase64Image } from '../services/imagePaths.js';
+import { imageDisplayUrl, persistGeneratedImage, toClientImage } from '../services/imageReferences.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt } from '../services/dreamService.js';
@@ -1371,10 +1371,13 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
       for (const img of result.images) {
         const ts = Date.now();
         const filename = `${ts}_${img.filename || 'comfy.png'}`;
-        const url = saveBase64Image('chat', filename, img.base64);
-        urls.push(url);
-        img.url = url;
+        const stored = persistGeneratedImage(img, 'chat', filename);
+        if (!stored) continue;
+        urls.push(stored);
+        img.url = imageDisplayUrl(stored);
       }
+
+      if (urls.length === 0) throw new Error('生成结果没有可保存的图片引用');
 
       // 使相册缓存失效
       invalidateGalleryCache();
@@ -1387,7 +1390,7 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
       db.prepare(`UPDATE image_tasks SET status='done', prompt_refined=?, output_paths=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)
         .run(result.promptRefined || prompt, JSON.stringify(urls), result.wfMode, taskId);
 
-      send('generate_done', { taskId, images: result.images, source: result.source });
+      send('generate_done', { taskId, images: result.images.map(toClientImage), source: result.source });
 
       // 生图成功 → 智能配图计数器重置为 3
       imageJudgeCounters.set(conversationId, 3);
@@ -1924,8 +1927,8 @@ async function handleDreamTalkReply(res, characterId, conversationId, userMsgId,
       const urls = [];
       for (const img of result.images) {
         const filename = `${Date.now()}_${img.filename || 'dream.png'}`;
-        const url = saveBase64Image('chat', filename, img.base64);
-        if (url) urls.push(url);
+        const stored = persistGeneratedImage(img, 'chat', filename);
+        if (stored) urls.push(stored);
       }
       if (urls.length > 0) {
         db.prepare('UPDATE messages SET images = ? WHERE id = ?')
@@ -1933,7 +1936,7 @@ async function handleDreamTalkReply(res, characterId, conversationId, userMsgId,
         if (dream?.id) {
           try {
             db.prepare('UPDATE character_dreams SET image_path = ? WHERE id = ? AND image_path IS NULL')
-              .run(urls[0], dream.id);
+              .run(imageDisplayUrl(urls[0]), dream.id);
           } catch { /* 非关键路径 */ }
         }
       }
@@ -1943,7 +1946,7 @@ async function handleDreamTalkReply(res, characterId, conversationId, userMsgId,
 
       invalidateGalleryCache();
 
-      send('generate_done', { taskId: genTaskId, images: result.images.map(img => ({ ...img, url: img.url })) , source: result.source });
+      send('generate_done', { taskId: genTaskId, images: result.images.map(toClientImage), source: result.source });
     }
 
     console.log(`[dream] ${character.display_name} 睡中被叫，现编了一句梦话: "${talk}"${finalPrompt ? ' + 现场梦境图' : ''}`);

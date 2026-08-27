@@ -19,7 +19,7 @@ import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
-import { saveBase64Image } from './imagePaths.js';
+import { imageDisplayUrl, persistGeneratedImage } from './imageReferences.js';
 import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
 import { applyMemoryActions, softDeleteMemory } from './memory/memoryRepository.js';
@@ -549,12 +549,13 @@ ${directorPrompt}`
       eventData.prompt = genResult.promptRefined || eventData.prompt;
       const img = genResult.images[0];
       const filename = `event_${Date.now()}_${img.filename || 'comfy.png'}`;
-      imageUrl = saveBase64Image('events', filename, img.base64);
+      const storedImage = persistGeneratedImage(img, 'events', filename);
+      imageUrl = imageDisplayUrl(storedImage);
       recordCompletedImageTask({
         conversationId: `char_${character.id}_events`,
         promptOriginal: originalEventPrompt,
         promptRefined: eventData.prompt,
-        outputPaths: [imageUrl],
+        outputPaths: [storedImage],
         style: charArtist !== null ? charArtist : config.comfyui.eventArtist,
         resolution: `${config.comfyui.eventWidth}x${config.comfyui.eventHeight}`,
         workflowTemplate: genResult.wfMode,
@@ -935,12 +936,13 @@ ${directorPrompt2}${prevSceneBlock}`
       branchData.prompt = genResult.promptRefined || branchData.prompt;
       const img = genResult.images[0];
       const filename = `event_${Date.now()}_${img.filename || 'comfy.png'}`;
-      imageUrl = saveBase64Image('events', filename, img.base64);
+      const storedImage = persistGeneratedImage(img, 'events', filename);
+      imageUrl = imageDisplayUrl(storedImage);
       recordCompletedImageTask({
         conversationId: `char_${character.id}_event_${event.id}_branch_${event.current_branch + 1}`,
         promptOriginal: originalBranchPrompt,
         promptRefined: branchData.prompt,
-        outputPaths: [imageUrl],
+        outputPaths: [storedImage],
         style: charArtist !== null ? charArtist : config.comfyui.eventArtist,
         resolution: `${config.comfyui.eventWidth}x${config.comfyui.eventHeight}`,
         workflowTemplate: genResult.wfMode,

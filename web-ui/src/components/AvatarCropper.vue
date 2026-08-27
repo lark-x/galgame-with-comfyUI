@@ -30,7 +30,7 @@
         <img
           v-for="(url, i) in recentImages"
           :key="'rec'+i"
-          :src="url"
+          :src="imageUrl(url)"
           class="av-thumb"
           @click="selectRecentImage(url)"
           @error="onRecentImgErr(i)"
@@ -102,6 +102,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onUnmounted } from 'vue'
 import { generateAvatar } from '../api/index.js'
+import { imageUrl } from '../utils/imageReferences.js'
 
 const props = defineProps({
   title: { type: String, default: '选择头像' },
@@ -226,7 +227,7 @@ function selectRecentImage(url) {
   img.crossOrigin = 'anonymous'
   img.onload = () => startCrop(img)
   img.onerror = () => {}
-  img.src = url
+  img.src = imageUrl(url)
 }
 
 function loadImageFromFile(file) {

@@ -72,6 +72,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { listGalleryImages } from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
+import { imageUrl } from '../utils/imageReferences.js'
 
 const PAGE_SIZE = 60
 
@@ -157,7 +158,7 @@ const lightboxImgs = computed(() => {
   const urls = []
   for (const group of visibleDayGroups.value) {
     for (const img of group.images) {
-      urls.push(img.url)
+      urls.push(imageUrl(img))
     }
   }
   return urls
@@ -171,7 +172,7 @@ function onPreview(flatIndex) {
 function onRegenerated(newUrl) {
   const base = newUrl.replace(/\?.*$/, '')
   for (const img of images.value) {
-    if (img.url.replace(/\?.*$/, '') === base) {
+    if (imageUrl(img).replace(/\?.*$/, '') === base) {
       img.url = newUrl
     }
   }
@@ -179,7 +180,7 @@ function onRegenerated(newUrl) {
 
 function onDeleted(deletedUrl) {
   const base = deletedUrl.replace(/\?.*$/, '')
-  images.value = images.value.filter(img => img.url.replace(/\?.*$/, '') !== base)
+  images.value = images.value.filter(img => imageUrl(img).replace(/\?.*$/, '') !== base)
   total.value = Math.max(0, total.value - 1)
 }
 

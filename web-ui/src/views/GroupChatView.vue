@@ -70,9 +70,9 @@
               <img
                 v-for="(url, i) in msg.images"
                 :key="i"
-                :src="url"
+                :src="imageUrl(url)"
                 class="msg-image"
-                @click="previewUrl = url"
+                @click="previewUrl = imageUrl(url)"
               />
             </div>
           </div>
@@ -260,6 +260,7 @@
 </template>
 
 <script setup>
+import { imageUrl } from '../utils/imageReferences.js'
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGroupsStore } from '../stores/groups.js'

@@ -27,7 +27,7 @@ import { charArtistOverride } from './characterImageOpts.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getLightHint, getLightNoteWithWeather, getTimeLightInline } from './timeLight.js';
-import { saveBase64Image } from './imagePaths.js';
+import { persistGeneratedImage } from './imageReferences.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getCoreDialogueRules } from '../builtinRules.js';
 import { getFreshUnsharedDream, markDreamShared } from './dreamService.js';
@@ -679,8 +679,8 @@ ${motiveName}
     const urls = [];
     for (const img of result.images) {
       const filename = `${Date.now()}_${img.filename || 'comfy.png'}`;
-      const url = saveBase64Image('chat', filename, img.base64);
-      urls.push(url);
+      const stored = persistGeneratedImage(img, 'chat', filename);
+      if (stored) urls.push(stored);
     }
 
     const db = getDb();

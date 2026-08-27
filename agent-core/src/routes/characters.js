@@ -17,7 +17,7 @@ import { generateImage, generateImageRaw, getLastWorkflowMode } from '../service
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
-import { saveBase64Image } from '../services/imagePaths.js';
+import { imageDisplayUrl, imageIdentity, parseImageValues, persistGeneratedImage, toClientImage } from '../services/imageReferences.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
@@ -388,12 +388,10 @@ router.get('/:id/recent-images', (req, res) => {
   `).all(conversationId);
 
   for (const row of chatRows) {
-    try {
-      const arr = JSON.parse(row.images);
-      for (const u of arr) {
-        if (!seen.has(u)) { seen.add(u); urls.push(u); }
-      }
-    } catch {}
+    for (const u of parseImageValues(row.images)) {
+      const key = imageIdentity(u);
+      if (key && !seen.has(key)) { seen.add(key); urls.push(u); }
+    }
   }
 
   // 2. 朋友圈配图
@@ -404,12 +402,10 @@ router.get('/:id/recent-images', (req, res) => {
   `).all(characterId);
 
   for (const row of momentRows) {
-    try {
-      const arr = JSON.parse(row.images);
-      for (const u of arr) {
-        if (!seen.has(u)) { seen.add(u); urls.push(u); }
-      }
-    } catch {}
+    for (const u of parseImageValues(row.images)) {
+      const key = imageIdentity(u);
+      if (key && !seen.has(key)) { seen.add(key); urls.push(u); }
+    }
   }
 
   res.json({ images: urls });
@@ -940,12 +936,13 @@ router.post('/:id/gift', async (req, res) => {
         if (imgResult.success && imgResult.images.length > 0) {
           const img = imgResult.images[0];
           const filename = `gift_${Date.now()}_${img.filename || 'comfy.png'}`;
-          const imageUrl = saveBase64Image('gifts', filename, img.base64);
+          const storedImage = persistGeneratedImage(img, 'gifts', filename);
+          const imageUrl = imageDisplayUrl(storedImage);
           db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
             VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-            .run(conversationId, result.imagePrompt, imgResult.promptRefined || result.imagePrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+            .run(conversationId, result.imagePrompt, imgResult.promptRefined || result.imagePrompt, JSON.stringify([storedImage]), getLastWorkflowMode());
           db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
-            .run(JSON.stringify([imageUrl]), msgId);
+            .run(JSON.stringify([storedImage]), msgId);
           console.log(`[gift] image attached to msg #${msgId}: ${imageUrl}`);
         }
       }).catch(err => {
@@ -1111,8 +1108,9 @@ ${char.base_prompt}
       for (const img of result.images) {
         const ts = Date.now();
         const filename = `avatar_gen_${req.params.id}_${ts}_${img.filename || 'comfy.png'}`;
-        const url = saveBase64Image('avatargen', filename, img.base64);
-        savedPaths.push(url);
+        const stored = persistGeneratedImage(img, 'avatargen', filename);
+        const url = imageDisplayUrl(stored);
+        if (url) savedPaths.push(url);
         img.url = url;
       }
 
@@ -1127,7 +1125,7 @@ ${char.base_prompt}
 
       res.json({
         success: true,
-        images: result.images,
+        images: result.images.map(toClientImage),
         savedPaths,
         promptId: result.promptId,
         promptText,

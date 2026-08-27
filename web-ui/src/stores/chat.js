@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
+import { imageIdentity, normalizeImage } from '../utils/imageReferences.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
@@ -93,7 +94,7 @@ export const useChatStore = defineStore('chat', () => {
               type: 'image_gen',
               genId: `hist_${msg.id}_${genSeq++}`,
               genStatus: 'done',
-              images: imageUrls.map(url => ({ url, base64: null })),
+              images: imageUrls.map(normalizeImage),
               created_at: msg.created_at,
             });
           }
@@ -666,7 +667,7 @@ export const useChatStore = defineStore('chat', () => {
         // 避免与 rawToMessages 加载时重复：检查最后一个气泡是否已经是同一批图片的 image_gen
         const lastMsg = messages.value[messages.value.length - 1];
         const alreadyHas = lastMsg?.type === 'image_gen' && lastMsg.images?.length === data.images.length
-          && lastMsg.images.every((img, i) => img.url === data.images[i]);
+          && lastMsg.images.every((img, i) => imageIdentity(img) === imageIdentity(data.images[i]));
         if (!alreadyHas) {
           messages.value.push({
             id: uid(),
@@ -674,7 +675,7 @@ export const useChatStore = defineStore('chat', () => {
             type: 'image_gen',
             genId: `proactive_${data.raw_id || data.msg_id}_${Date.now()}`,
             genStatus: 'done',
-            images: data.images.map(url => ({ url, base64: null })),
+            images: data.images.map(normalizeImage),
             created_at: data.created_at,
           });
         }

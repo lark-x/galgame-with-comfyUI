@@ -34,7 +34,7 @@
               <img
                 v-for="(img, i) in post.images"
                 :key="i"
-                :src="img"
+                :src="imageUrl(img)"
                 class="share-img"
                 crossorigin="anonymous"
                 alt="配图"
@@ -94,6 +94,7 @@
 </template>
 
 <script setup>
+import { imageUrl } from '../utils/imageReferences.js'
 import { ref, computed, watch, nextTick } from 'vue'
 import html2canvas from 'html2canvas'
 

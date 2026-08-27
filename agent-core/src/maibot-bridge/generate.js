@@ -1,11 +1,11 @@
 ﻿/**
  * maibot-bridge/generate.js
- * 生图任务：复用主聊天流的 generateImage + saveBase64Image，落 image_tasks 表供插件轮询。
+ * 生图任务：复用主聊天流的 generateImage，落 image_tasks 表供插件轮询。
  */
 import { getDb } from '../db/index.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
-import { saveBase64Image } from '../services/imagePaths.js';
+import { imageDisplayUrl, persistGeneratedImage, toArtifactImageReference } from '../services/imageReferences.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 
 export function parseLoras(char) {
@@ -47,10 +47,12 @@ export function startImageTask({ character, conversationId, prompt, assistantMsg
         for (const img of result.images) {
           const ts = Date.now();
           const filename = `${ts}_${img.filename || 'comfy.png'}`;
-          const url = saveBase64Image('chat', filename, img.base64);
-          urls.push(url);
-          img.url = url;
+          const stored = persistGeneratedImage(img, 'chat', filename);
+          if (!stored) continue;
+          urls.push(stored);
+          img.url = imageDisplayUrl(stored);
         }
+        if (urls.length === 0) throw new Error('生成结果没有可保存的图片引用');
         db.prepare(
           `UPDATE image_tasks SET status='done', prompt_refined=?, output_paths=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`
         ).run(result.promptRefined || prompt, JSON.stringify(urls), result.wfMode, taskId);
@@ -82,10 +84,12 @@ export function getTask(taskId) {
   ).get(Number(taskId));
   if (!task) return null;
   const paths = task.output_paths ? JSON.parse(task.output_paths) : [];
+  const first = paths[0] || null;
+  const reference = toArtifactImageReference(first);
   return {
     id: task.id,
     status: task.status,
-    image: paths.length > 0 ? { url: paths[0] } : null,
+    image: first ? { ...(reference || {}), url: imageDisplayUrl(first) } : null,
     error: task.error_message || null,
   };
 }

@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { saveBase64Image } from '../services/imagePaths.js';
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlobalRule } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { charArtistOverrideWithFallback } from '../services/characterImageOpts.js';
 import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
+import { persistGeneratedImage } from '../services/imageReferences.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
 import { getTimeTag, getLightNoteWithWeather } from '../services/timeLight.js';
@@ -645,8 +645,8 @@ ${rules}`;
       for (const img of genResult.images) {
         const ts = Date.now();
         const filename = `moment_${ts}_${img.filename || 'comfy.png'}`;
-        const url = saveBase64Image('moments', filename, img.base64);
-        imageUrls.push(url);
+        const stored = persistGeneratedImage(img, 'moments', filename);
+        if (stored) imageUrls.push(stored);
       }
       recordCompletedImageTask({
         conversationId: `char_${character.id}_moments`,

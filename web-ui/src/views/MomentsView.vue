@@ -117,6 +117,7 @@ import MomentCard from '../components/MomentCard.vue'
 import ShareCard from '../components/ShareCard.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LibraryModal from '../components/LibraryModal.vue'
+import { imageUrl } from '../utils/imageReferences.js'
 
 const moments = useMomentsStore()
 const chat = useChatStore()
@@ -146,7 +147,7 @@ function onFilterWheel(e) {
 const characters = computed(() => [...chat.characters].sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')))
 
 function onPreview({ images, index }) {
-  previewImage.value = images[index]
+  previewImage.value = imageUrl(images[index])
 }
 
 function onShare(post) {

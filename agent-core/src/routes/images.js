@@ -16,8 +16,10 @@ import { IMAGE_PROMPT_RULE, getWorldIntegrationRule } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { parseLoras } from '../maibot-bridge/generate.js';
 import { extractImagePromptResponse } from '../services/imagePromptResponse.js';
+import { imageDisplayUrl, isArtifactImage, persistGeneratedImage, parseImageValues } from '../services/imageReferences.js';
 import fs from 'fs';
 import path from 'path';
+import { Readable } from 'node:stream';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IMAGES_DIR = resolve(__dirname, '../../data/images');
@@ -148,6 +150,62 @@ export function invalidateGalleryCache() {
   galleryCache.mtime = 0;
 }
 
+function validArtifactId(value) {
+  return /^[A-Za-z0-9_-]{8,160}$/.test(String(value || ''));
+}
+
+/**
+ * Stream a SthStart artifact through the neighbour server. Message records
+ * keep only artifactId plus display metadata; this route obtains the protected
+ * bytes with the app token on every request, so no expiring signed URL or
+ * credential is exposed to the browser.
+ */
+async function proxyPublicArtifact(req, res) {
+  if (!config.publicServices.image || !config.publicServices.appToken) {
+    return res.status(503).json({ error: 'sthstart_public_image_not_configured' });
+  }
+  if (!validArtifactId(req.params.id)) {
+    return res.status(400).json({ error: 'invalid_artifact_id' });
+  }
+
+  const url = `${config.publicServices.baseURL}/api/v1/artifacts/${encodeURIComponent(req.params.id)}`;
+  let response;
+  try {
+    response = await fetch(url, {
+      method: req.method,
+      headers: { Authorization: `Bearer ${config.publicServices.appToken}`, Accept: '*/*' },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    console.warn(`[sthstart-public-image] artifact proxy unavailable: ${error.message}`);
+    return res.status(503).json({ error: 'sthstart_public_image_unavailable' });
+  }
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    return res.status(response.status).json({
+      error: response.status === 404 ? 'artifact_not_found' : 'sthstart_public_image_error',
+      ...(detail ? { message: detail.slice(0, 240) } : {}),
+    });
+  }
+
+  for (const header of ['content-type', 'content-length', 'etag', 'last-modified', 'cache-control', 'accept-ranges', 'content-range']) {
+    const value = response.headers.get(header);
+    if (value) res.setHeader(header, value);
+  }
+  res.status(response.status);
+  if (req.method === 'HEAD' || !response.body) return res.end();
+
+  Readable.fromWeb(response.body).on('error', (error) => {
+    console.warn(`[sthstart-public-image] artifact stream failed: ${error.message}`);
+    if (!res.headersSent) res.status(502);
+    res.end();
+  }).pipe(res);
+}
+
+router.get('/artifacts/:id', proxyPublicArtifact);
+router.head('/artifacts/:id', proxyPublicArtifact);
+
 // GET /api/images/gallery — 获取相册图片列表（按修改时间倒序，支持分页 + 文件夹筛选）
 router.get('/gallery', async (req, res) => {
   try {
@@ -240,10 +298,13 @@ router.post('/generate', async (req, res) => {
   generateImage(prompt, { promptScene: 'standalone', ragTimeoutMs: RAG_TIMEOUT_FAST_MS })
     .then(result => {
       if (result.success) {
+        const outputPaths = result.images
+          .map((img, index) => persistGeneratedImage(img, 'chat', `${Date.now()}_${index}_${img.filename || 'comfy.png'}`))
+          .filter(Boolean);
         db.prepare(`
           UPDATE image_tasks SET status = 'done', prompt_refined = ?, output_paths = ?, workflow_template = ?, finished_at = datetime('now')
           WHERE id = ?
-        `).run(result.promptRefined || prompt, JSON.stringify(result.images.map(i => i.filename)), result.wfMode, taskId);
+        `).run(result.promptRefined || prompt, JSON.stringify(outputPaths), result.wfMode, taskId);
       } else {
         db.prepare(`
           UPDATE image_tasks SET status = 'failed', error_message = ?, workflow_template = ?, finished_at = datetime('now')
@@ -454,7 +515,18 @@ async function pickLatestTestImage() {
   if (task) {
     let urls = [];
     try { urls = JSON.parse(task.output_paths || '[]'); } catch {}
-    const url = urls.find(u => parseImageTarget(String(u).replace(/\?.*$/, '')));
+    const artifact = urls.find(isArtifactImage);
+    if (artifact) {
+      saved = {
+        type: 'artifact',
+        artifactId: artifact.artifactId,
+        url: imageDisplayUrl(artifact),
+        at: Date.parse(task.finished_at || task.created_at || '') || 0,
+        promptFallback: task.prompt_refined || task.prompt_original || '',
+        workflowTemplateFallback: task.workflow_template || null,
+      };
+    }
+    const url = urls.find(u => !isArtifactImage(u) && parseImageTarget(String(u).replace(/\?.*$/, '')));
     if (url) {
       const cleanUrl = String(url).replace(/\?.*$/, '');
       const target = parseImageTarget(cleanUrl);
@@ -487,6 +559,18 @@ async function pickLatestTestImage() {
   return saved;
 }
 
+async function downloadPublicArtifact(artifactId) {
+  if (!config.publicServices.image || !config.publicServices.appToken || !isArtifactImage({ artifactId })) {
+    throw new Error('SthStart 公共图片产物不可用');
+  }
+  const response = await fetch(`${config.publicServices.baseURL}/api/v1/artifacts/${encodeURIComponent(artifactId)}`, {
+    headers: { Authorization: `Bearer ${config.publicServices.appToken}`, Accept: 'image/*' },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`SthStart 公共图片产物读取失败 (${response.status})`);
+  return Buffer.from(await response.arrayBuffer());
+}
+
 // POST /api/images/test-hires — 测试细化（最近一张图，HiresFix 参数流程，不落盘）
 router.post('/test-hires', async (req, res) => {
   const t0 = performance.now();
@@ -502,17 +586,31 @@ router.post('/test-hires', async (req, res) => {
 
     if (source.type === 'test') {
       const img = source.images?.[0];
-      if (!img?.base64) {
+      if (!img?.base64 && !isArtifactImage(img)) {
         return res.status(404).json({ success: false, error: '最近一次测试画风结果不可用，请先发送测试' });
       }
-      original = img.base64;
-      buffer = Buffer.from(img.base64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+      if (isArtifactImage(img)) {
+        original = imageDisplayUrl(img);
+        buffer = await downloadPublicArtifact(img.artifactId);
+      } else {
+        original = img.base64;
+        buffer = Buffer.from(img.base64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+      }
       refineOpts.promptText = source.prompt;
       refineOpts.artist = source.artist;
       refineOpts.loras = [];
       refineOpts.sourceMode = source.wfMode;
       refineOpts.scene = source.mode;
       refineOpts.ext = path.extname(img.filename || '') || '.png';
+    } else if (source.type === 'artifact') {
+      original = source.url;
+      buffer = await downloadPublicArtifact(source.artifactId);
+      refineOpts.promptText = source.promptFallback;
+      refineOpts.artist = config.comfyui.artist;
+      refineOpts.loras = [];
+      refineOpts.sourceMode = source.workflowTemplateFallback;
+      refineOpts.scene = 'chat';
+      refineOpts.ext = path.extname(source.filename || '') || '.png';
     } else {
       const cleanUrl = source.url.replace(/\?.*$/, '');
       const target = parseImageTarget(cleanUrl);
@@ -836,6 +934,10 @@ router.delete('/delete', async (req, res) => {
   const { url: imageUrl } = req.body;
   if (!imageUrl) return res.status(400).json({ error: 'url is required' });
 
+  if (typeof imageUrl === 'object' || String(imageUrl).includes('/api/images/artifacts/')) {
+    return res.status(409).json({ error: 'central_artifact_managed', message: '公共图片由 SthStart 管理，请在公共服务页面处理。' });
+  }
+
   const cleanUrl = imageUrl.replace(/\?.*$/, '');
   const match = cleanUrl.match(/^\/images\/([^/]+)\/([^/]+)$/);
 
@@ -879,9 +981,9 @@ router.delete('/delete', async (req, res) => {
 
         for (const row of msgRows) {
           try {
-            const urls = JSON.parse(row.images) || [];
+            const urls = parseImageValues(row.images);
             const filtered = urls.filter(u => {
-              const uBase = u.replace(/\?.*$/, '');
+              const uBase = imageDisplayUrl(u).replace(/\?.*$/, '');
               return uBase !== cleanUrl;
             });
             if (filtered.length > 0) {

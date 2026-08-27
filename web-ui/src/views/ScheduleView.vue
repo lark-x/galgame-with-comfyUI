@@ -346,6 +346,7 @@
 </template>
 
 <script setup lang="ts">
+import { imageUrl } from '../utils/imageReferences.js'
 import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '../stores/schedule.js'
@@ -697,7 +698,7 @@ onMounted(async () => {
   try {
     onEvent('schedule_peek_ready', (d: any) => {
       if (d.prompt) peekPrompt.value = d.prompt
-      if (d.images?.length) { peekImage.value = d.images[0]; peekError.value = null }
+      if (d.images?.length) { peekImage.value = imageUrl(d.images[0]); peekError.value = null }
       else if (d.error) { peekError.value = d.error }
       peekLoading.value = false; peekBusy.value = false
       simulatedPct.value = 100

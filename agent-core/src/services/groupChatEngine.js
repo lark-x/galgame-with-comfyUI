@@ -26,7 +26,8 @@ import { countCompletedGroupRounds } from './groupRoundCounter.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from './imagePromptKnowledge.js';
-import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
+import { deleteImageFileByUrl } from './imagePaths.js';
+import { imageDisplayUrl, persistGeneratedImage } from './imageReferences.js';
 import { maybeSummarize, getRecentSummaries } from './summarizer.js';
 import { curateChatMemories } from './memoryExtractor.js';
 import { getCheckpoint, rollbackMemoriesFromRawId } from './memory/memoryRepository.js';
@@ -523,8 +524,10 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
     const urls = [];
     for (const img of result.images) {
       const filename = `${Date.now()}_${img.filename || 'comfy.png'}`;
-      urls.push(saveBase64Image('chat', filename, img.base64));
+      const stored = persistGeneratedImage(img, 'chat', filename);
+      if (stored) urls.push(stored);
     }
+    if (urls.length === 0) throw new Error('生成结果没有可保存的图片引用');
     db.prepare(`UPDATE messages SET images = ? WHERE id = ?`).run(JSON.stringify(urls), targetMsgId);
     db.prepare(`UPDATE image_tasks SET status='done', output_paths=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)
       .run(JSON.stringify(urls), result.wfMode, taskId);
@@ -534,7 +537,7 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
       invalidateGalleryCache();
     } catch { /* gallery 缓存失效失败不影响主流程 */ }
     emit('generate_done', { group_id: group.id, taskId, msg_id: targetMsgId, images: urls, speaker_character_id: speaker.id });
-    console.log(`[group] image done for ${speaker.display_name} in group ${group.id}: ${urls[0]}`);
+    console.log(`[group] image done for ${speaker.display_name} in group ${group.id}: ${imageDisplayUrl(urls[0])}`);
   } catch (err) {
     console.error(`[group] image failed for group ${group.id}:`, err.message);
     db.prepare(`UPDATE image_tasks SET status='failed', error_message=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)

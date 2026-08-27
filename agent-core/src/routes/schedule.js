@@ -31,7 +31,7 @@ import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { chatSync } from '../llm/llm-client.js';
 import { getTimeLightInline } from '../services/timeLight.js';
-import { saveBase64Image } from '../services/imagePaths.js';
+import { imageDisplayUrl, persistGeneratedImage } from '../services/imageReferences.js';
 import { processWakeUp } from '../services/wakeService.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 
@@ -243,20 +243,6 @@ router.get('/:characterId/current', (req, res) => {
   }
 });
 
-/** 将 base64 图片落盘，返回对外可访问的 URL 路径 */
-function savePeekImage(base64, filename) {
-  try {
-    const ext = base64.match(/^data:image\/(\w+);base64,/)?.[1] || 'png';
-    const safeName = `peek_${filename}_${Date.now()}.${ext}`;
-    const url = saveBase64Image('peek', safeName, base64);
-    console.log(`[schedule] Peek image saved: ${safeName} → ${url}`);
-    return url;
-  } catch (err) {
-    console.error('[schedule] Failed to save peek image:', err.message);
-    return null;
-  }
-}
-
 // ── POST /api/schedule/:characterId/peek/retake — 再拍一张（必须在 peek 前定义，避免被 :characterId/peek 前缀匹配）──
 
 router.post('/:characterId/peek/retake', async (req, res) => {
@@ -316,17 +302,18 @@ router.post('/:characterId/peek/retake', async (req, res) => {
 
       if (result.success && result.images?.length > 0) {
         const img = result.images[0];
-        const imageUrl = savePeekImage(img.base64, img.filename || 'comfy');
-        if (imageUrl) {
+        const storedImage = persistGeneratedImage(img, 'peek', `peek_${img.filename || 'comfy.png'}_${Date.now()}`);
+        const imageUrl = imageDisplayUrl(storedImage);
+        if (storedImage) {
           db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
             VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-            .run(`char_${character.id}_schedule_peek_retake`, prompt, result.promptRefined || prompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+            .run(`char_${character.id}_schedule_peek_retake`, prompt, result.promptRefined || prompt, JSON.stringify([storedImage]), getLastWorkflowMode());
         }
         broadcast('schedule_peek_ready', {
           character_id: character.id,
           display_name: character.display_name,
           prompt,
-          images: imageUrl ? [imageUrl] : [img.base64],
+          images: imageUrl ? [imageUrl] : (img.base64 ? [img.base64] : []),
         });
         console.log(`[schedule] Peek retake ready for ${character.display_name}`);
       } else {
@@ -568,11 +555,12 @@ router.post('/:characterId/peek', async (req, res) => {
       if (result.success && result.images?.length > 0) {
         // 图片落盘，通过 URL 发送（base64 过大可能导致 SSE 写失败）
         const img = result.images[0];
-        const imageUrl = savePeekImage(img.base64, img.filename || 'comfy');
-        if (imageUrl) {
+        const storedImage = persistGeneratedImage(img, 'peek', `peek_${img.filename || 'comfy.png'}_${Date.now()}`);
+        const imageUrl = imageDisplayUrl(storedImage);
+        if (storedImage) {
           db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
             VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-            .run(`char_${character.id}_schedule_peek`, generatedPrompt, result.promptRefined || generatedPrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+            .run(`char_${character.id}_schedule_peek`, generatedPrompt, result.promptRefined || generatedPrompt, JSON.stringify([storedImage]), getLastWorkflowMode());
         }
         broadcast('schedule_peek_ready', {
           character_id: character.id,
@@ -580,7 +568,7 @@ router.post('/:characterId/peek', async (req, res) => {
           activity: activity.activity,
           location: activity.location,
           prompt: generatedPrompt,
-          images: imageUrl ? [imageUrl] : [img.base64], // 落盘失败则仍然传 base64 兜底
+          images: imageUrl ? [imageUrl] : (img.base64 ? [img.base64] : []), // 独立模式下落盘失败仍保留旧 base64 兜底
         });
         console.log(`[schedule] Peek snapshot ready for ${charName}`);
       } else {

@@ -159,7 +159,7 @@
           <img
             v-for="(img, i) in styleImages"
             :key="i"
-            :src="img.base64"
+            :src="imageUrl(img) || img.base64"
             class="style-preview-img"
             @click="openLightbox(i)"
             alt="测试画风结果"
@@ -1061,6 +1061,7 @@ import DropdownSelect from '../components/DropdownSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
+import { imageUrl } from '../utils/imageReferences.js'
 
 const settingsStore = useSettingsStore()
 const router = useRouter()
@@ -2135,7 +2136,7 @@ async function doWorkflowReset2() {
 // Lightbox
 const lightboxVisible = ref(false)
 const lightboxIndex = ref(0)
-const lightboxImgs = computed(() => styleImages.value.map(i => i.base64))
+const lightboxImgs = computed(() => styleImages.value.map(i => imageUrl(i) || i.base64))
 
 function openLightbox(index) {
   lightboxIndex.value = index

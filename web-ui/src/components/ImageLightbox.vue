@@ -34,6 +34,7 @@ import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 import { deleteImage } from '../api/index.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
+import { imageUrl } from '../utils/imageReferences.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -107,6 +108,10 @@ function removeActionBar() {
 function injectActionBar() {
   if (_actionBar || !props.visible) return
   // 三个操作按钮全关 → 不注入操作栏（纯预览模式）
+  // SthStart central artifacts are read-only from the neighbour. They must
+  // remain previewable, but local delete/regenerate/upscale actions would
+  // otherwise send URLs that the neighbour cannot own.
+  if (isManagedImage.value) return
   if (!props.showDelete && !props.showRegenerate && !props.showUpscale) return
   const modal = document.querySelector('.vel-modal')
   if (!modal) return
@@ -188,15 +193,18 @@ function bumpUrl(url) {
 
 const cachedImgs = computed(() => {
   const v = props.imgs
-  if (!cacheBump.value) return v
+  if (!cacheBump.value) {
+    if (Array.isArray(v)) return v.map(item => imageUrl(item) || item)
+    return imageUrl(v) || v
+  }
   if (typeof v === 'string') return bumpUrl(v)
   if (Array.isArray(v)) {
-    return v.map(i => (typeof i === 'string' ? bumpUrl(i) : i?.src ? { ...i, src: bumpUrl(i.src) } : i))
+    return v.map(i => {
+      const url = imageUrl(i)
+      return url ? bumpUrl(url) : i
+    })
   }
-  if (v && typeof v === 'object' && v.src) {
-    return { ...v, src: bumpUrl(v.src) }
-  }
-  return v
+  return imageUrl(v) ? bumpUrl(imageUrl(v)) : v
 })
 
 function getCurrentUrl() {
@@ -204,11 +212,28 @@ function getCurrentUrl() {
   if (typeof v === 'string') return v
   if (Array.isArray(v) && v.length > 0) {
     const item = v[Math.min(props.index, v.length - 1)]
-    return typeof item === 'string' ? item : item?.src || ''
+    return imageUrl(item)
   }
-  if (v && typeof v === 'object' && v.src) return v.src
-  return ''
+  return imageUrl(v)
 }
+
+function currentImageValue() {
+  const v = props.imgs
+  if (Array.isArray(v)) return v[Math.min(props.index, v.length - 1)]
+  return v
+}
+
+function isManagedImageValue(value) {
+  if (value && typeof value === 'object' && typeof value.artifactId === 'string' && value.artifactId) return true
+  return imageUrl(value).replace(/\?.*$/, '').startsWith('/api/images/artifacts/')
+}
+
+const isManagedImage = computed(() => isManagedImageValue(currentImageValue()))
+
+watch(isManagedImage, (managed) => {
+  removeActionBar()
+  if (!managed && props.visible) setTimeout(injectActionBar, 80)
+})
 
 /** 扫描页面上所有 img / background-image，把旧图 URL 替换为带 cache-bust 的新 URL */
 function refreshAllThumbnails(oldUrl) {
@@ -250,11 +275,11 @@ function _hasUrlInImgs(base) {
   if (typeof v === 'string') return v.replace(/\?.*$/, '') === base
   if (Array.isArray(v)) {
     return v.some(item => {
-      const u = typeof item === 'string' ? item : item?.src
+      const u = imageUrl(item)
       return !!u && u.replace(/\?.*$/, '') === base
     })
   }
-  if (v && typeof v === 'object' && v.src) return v.src.replace(/\?.*$/, '') === base
+  if (v && typeof v === 'object') return imageUrl(v).replace(/\?.*$/, '') === base
   return false
 }
 
@@ -266,6 +291,7 @@ function onHide() {
 
 async function onRegenerate() {
   if (regenerating.value) return
+  if (isManagedImage.value) return
   const url = getCurrentUrl()
   if (!url) return
   regenerating.value = true
@@ -284,6 +310,7 @@ async function onRegenerate() {
 
 async function onUpscale() {
   if (upscaling.value) return
+  if (isManagedImage.value) return
   const url = getCurrentUrl()
   if (!url) return
   upscaling.value = true
@@ -302,6 +329,7 @@ async function onUpscale() {
 
 async function onDelete() {
   if (deleting.value) return
+  if (isManagedImage.value) return
   const url = getCurrentUrl()
   if (!url) return
   const ok = confirmFn

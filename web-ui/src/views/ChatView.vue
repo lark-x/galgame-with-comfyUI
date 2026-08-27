@@ -513,6 +513,7 @@
 </template>
 
 <script setup>
+import { normalizeImage } from '../utils/imageReferences.js'
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
@@ -677,7 +678,7 @@ function onGiftSent(result) {
           if (Array.isArray(urls) && urls.length > 0) {
             const idx = chat.messages.findIndex(m => m.genId === genId)
             if (idx >= 0) {
-              chat.messages[idx].images = urls.map(url => ({ url, base64: null }))
+              chat.messages[idx].images = urls.map(normalizeImage)
               chat.messages[idx].genStatus = 'done'
             }
           }

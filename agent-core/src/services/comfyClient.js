@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import WebSocket from 'ws';
 import { config } from '../config.js';
+import { toArtifactImageReference } from './imageReferences.js';
 
 const getBase = () => config.comfyui.url.replace(/\/+$/, '');
 const getWsBase = () => config.comfyui.url.replace(/^http/, 'ws');
@@ -461,9 +462,22 @@ function formatComfyUIError(errText, status) {
 }
 
 export async function submitWorkflow(guiWorkflow, onProgress) {
-  if (config.publicServices.image && config.publicServices.appToken) {
-    const publicResult = await submitPublicWorkflow(guiWorkflow, onProgress);
-    if (publicResult) return publicResult;
+  if (config.publicServices.image) {
+    if (!config.publicServices.appToken) {
+      throw publicImageError('邻舍已启用 SthStart 公共图片托管，但缺少应用授权令牌', {
+        code: 'sthstart_public_not_configured',
+      });
+    }
+    try {
+      return await submitPublicWorkflow(guiWorkflow, onProgress);
+    } catch (error) {
+      if (error?.acceptedPublicTask) throw error;
+      if (error?.allowDirectFallback && config.publicServices.imageFallback) {
+        console.warn(`[sthstart-public-image] service unavailable before acceptance; temporary direct fallback enabled: ${error.message}`);
+      } else {
+        throw error;
+      }
+    }
   }
   const clientId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const apiPrompt = guiToApi(guiWorkflow);
@@ -522,7 +536,15 @@ export async function submitWorkflow(guiWorkflow, onProgress) {
   }
 }
 
-async function submitPublicWorkflow(guiWorkflow, onProgress) {
+function publicImageError(message, { code = 'sthstart_public_image_error', allowDirectFallback = false, acceptedPublicTask = false } = {}) {
+  const error = new Error(message);
+  error.code = code;
+  error.allowDirectFallback = allowDirectFallback;
+  error.acceptedPublicTask = acceptedPublicTask;
+  return error;
+}
+
+export async function submitPublicWorkflow(guiWorkflow, onProgress) {
   const serviceBase = config.publicServices.baseURL;
   const headers = {
     'Content-Type': 'application/json',
@@ -531,49 +553,89 @@ async function submitPublicWorkflow(guiWorkflow, onProgress) {
     ...(config.publicServices.imageProfile ? { 'X-SthStart-Profile': config.publicServices.imageProfile } : {}),
   };
   let accepted;
+  let response;
   try {
-    const response = await fetch(`${serviceBase}/api/v1/images/tasks`, {
+    response = await fetch(`${serviceBase}/api/v1/images/tasks`, {
       method: 'POST', headers, body: JSON.stringify({ workflow: guiToApi(guiWorkflow) }),
     });
-    if (!response.ok) {
-      console.warn(`[sthstart] public image request was not accepted (${response.status}); using direct ComfyUI`);
-      return null;
-    }
-    accepted = await response.json();
-    if (!accepted.id) {
-      console.warn('[sthstart] public image request returned no task id; using direct ComfyUI');
-      return null;
-    }
   } catch (error) {
-    console.warn(`[sthstart] public image unavailable before task acceptance; using direct ComfyUI: ${error.message}`);
-    return null;
+    throw publicImageError(`无法连接 SthStart 公共图片服务: ${error?.message || 'network error'}`, {
+      code: 'sthstart_public_unavailable',
+      allowDirectFallback: true,
+    });
+  }
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw publicImageError(`SthStart 公共图片服务拒绝请求 (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ''}`, {
+      code: 'sthstart_public_rejected',
+    });
+  }
+  try {
+    accepted = await response.json();
+  } catch (error) {
+    throw publicImageError(`SthStart 公共图片服务返回了无效响应: ${error?.message || 'invalid JSON'}`, {
+      code: 'sthstart_public_protocol_error',
+    });
+  }
+  if (!accepted || typeof accepted !== 'object' || Array.isArray(accepted) || !accepted.id) {
+    throw publicImageError('SthStart 公共图片服务未返回任务编号', { code: 'sthstart_public_protocol_error' });
   }
 
   // Once a public task id exists, never submit the workflow again: this prevents duplicate images.
   if (onProgress) onProgress({ phase: 'submitted', promptId: accepted.id });
   const deadline = Date.now() + 600_000;
   while (Date.now() < deadline) {
-    const response = await fetch(`${serviceBase}/api/v1/images/tasks/${accepted.id}`, {
-      headers: { Authorization: `Bearer ${config.publicServices.appToken}` },
-    });
-    if (!response.ok) throw new Error(`SthStart image task lookup returned ${response.status}`);
-    const task = await response.json();
-    if (task.status === 'complete') {
+    let response;
+    let task;
+    try {
+      response = await fetch(`${serviceBase}/api/v1/images/tasks/${encodeURIComponent(accepted.id)}`, {
+        headers: { Authorization: `Bearer ${config.publicServices.appToken}` },
+      });
+      if (!response.ok) {
+        throw new Error(`SthStart image task lookup returned ${response.status}`);
+      }
+      task = await response.json();
+    } catch (error) {
+      throw publicImageError(`SthStart 公共图片任务查询失败: ${error?.message || 'network error'}`, {
+        code: 'sthstart_public_task_error',
+        acceptedPublicTask: true,
+      });
+    }
+    if (task.status === 'complete' || task.status === 'succeeded') {
       const images = [];
       for (const artifact of task.artifacts || []) {
-        const artifactResponse = await fetch(new URL(artifact.url, serviceBase));
-        if (!artifactResponse.ok) throw new Error(`SthStart artifact download returned ${artifactResponse.status}`);
-        const contentType = artifactResponse.headers.get('content-type') || 'image/png';
-        const buffer = Buffer.from(await artifactResponse.arrayBuffer());
-        images.push({ base64: `data:${contentType};base64,${buffer.toString('base64')}`, filename: artifact.id });
+        const reference = toArtifactImageReference({
+          artifactId: artifact.id,
+          url: `/api/images/artifacts/${encodeURIComponent(String(artifact.id))}`,
+          contentType: artifact.content_type || artifact.contentType,
+          filename: artifact.filename || artifact.id,
+          byteSize: artifact.byte_size ?? artifact.byteSize,
+        });
+        if (reference) images.push(reference);
+      }
+      if (images.length === 0) {
+        throw publicImageError(`SthStart 公共图片任务 ${accepted.id} 已完成但没有可用图片`, {
+          code: 'sthstart_public_empty_result',
+          acceptedPublicTask: true,
+        });
       }
       if (onProgress) onProgress({ phase: 'done', promptId: accepted.id, imageCount: images.length, progress: 1 });
-      return { images, promptId: accepted.id };
+      console.log(`[sthstart-public-image] completed task ${accepted.id} with ${images.length} artifact reference(s)`);
+      return { images, promptId: accepted.id, source: 'sthstart-public' };
     }
-    if (task.status === 'failed' || task.status === 'cancelled') throw new Error(task.error || `SthStart image task ${task.status}`);
+    if (task.status === 'failed' || task.status === 'cancelled') {
+      throw publicImageError(task.error || `SthStart image task ${task.status}`, {
+        code: 'sthstart_public_task_failed',
+        acceptedPublicTask: true,
+      });
+    }
     await sleep(1000);
   }
-  throw new Error(`SthStart image task timeout for ${accepted.id}`);
+  throw publicImageError(`SthStart 公共图片任务 ${accepted.id} 超时`, {
+    code: 'sthstart_public_task_timeout',
+    acceptedPublicTask: true,
+  });
 }
 
 // ── WebSocket 实时进度 + 结果监听 ──

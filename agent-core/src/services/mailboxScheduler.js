@@ -5,7 +5,7 @@ import { generateImage } from './imageSkill.js';
 import { charArtistOverride } from './characterImageOpts.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { broadcast } from './unifiedStreamBus.js';
-import { saveBase64Image } from './imagePaths.js';
+import { imageDisplayUrl, persistGeneratedImage } from './imageReferences.js';
 import { hybridSearch } from './memorySearch.js';
 import { loadEmotionState, stateToPrompt } from './emotionEngine.js';
 import { formatScheduleContext } from './scheduleManager.js';
@@ -115,14 +115,17 @@ async function processReply(db, letter) {
 
     // ── 步骤3: 保存 ──
     const ts = Date.now();
-    const paperPath = saveBase64Image('mailbox', `paper_${letterId}_${ts}.png`, paperResult.image.base64);
-    const portraitPath = saveBase64Image('mailbox', `portrait_${letterId}_${ts}.png`, portraitResult.image.base64);
-    const illustrationPath = saveBase64Image('mailbox', `illustration_${letterId}_${ts}.png`, illustrationResult.image.base64);
+    const paperValue = persistGeneratedImage(paperResult.image, 'mailbox', `paper_${letterId}_${ts}.png`);
+    const portraitValue = persistGeneratedImage(portraitResult.image, 'mailbox', `portrait_${letterId}_${ts}.png`);
+    const illustrationValue = persistGeneratedImage(illustrationResult.image, 'mailbox', `illustration_${letterId}_${ts}.png`);
+    const paperPath = imageDisplayUrl(paperValue);
+    const portraitPath = imageDisplayUrl(portraitValue);
+    const illustrationPath = imageDisplayUrl(illustrationValue);
 
     const mailboxTasks = [
-      ['paper', data.paperPrompt, paperResult, paperPath, '1200x900'],
-      ['portrait', data.portraitPrompt, portraitResult, portraitPath, '900x1200'],
-      ['illustration', data.illustrationPrompt, illustrationResult, illustrationPath, '1200x900'],
+      ['paper', data.paperPrompt, paperResult, paperValue, '1200x900'],
+      ['portrait', data.portraitPrompt, portraitResult, portraitValue, '900x1200'],
+      ['illustration', data.illustrationPrompt, illustrationResult, illustrationValue, '1200x900'],
     ];
     for (const [kind, originalPrompt, generated, outputPath, resolution] of mailboxTasks) {
       recordCompletedImageTask({

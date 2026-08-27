@@ -25,6 +25,7 @@ import {
   HIRES_WORKFLOW, ACTIVE_WORKFLOW, PRO_WORKFLOW, autoRestoreMissing,
 } from './workflowTemplates.js';
 import { injectLoraNodes, NODE_TITLES } from './imageSkill.js';
+import { isArtifactImage } from './imageReferences.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW_DIR = path.join(__dirname, '..', '..', '..', 'workflow');
@@ -32,6 +33,26 @@ const WORKFLOW_DIR = path.join(__dirname, '..', '..', '..', 'workflow');
 const PROMPT_PLACEHOLDER = '请输入画面描述';
 
 function hiresPath() { return path.join(WORKFLOW_DIR, HIRES_WORKFLOW); }
+
+/**
+ * A public image result is intentionally only an artifact reference. HiresFix
+ * is an explicit transformation request, so this one path may fetch the
+ * source result server-side; ordinary chat/message persistence never does.
+ */
+async function downloadPublicArtifact(artifactId) {
+  if (!config.publicServices.image || !config.publicServices.appToken) {
+    throw new Error('SthStart 公共图片产物不可用');
+  }
+  const response = await fetch(
+    `${config.publicServices.baseURL}/api/v1/artifacts/${encodeURIComponent(artifactId)}`,
+    {
+      headers: { Authorization: `Bearer ${config.publicServices.appToken}`, Accept: 'image/*' },
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  if (!response.ok) throw new Error(`SthStart 公共图片产物读取失败 (${response.status})`);
+  return Buffer.from(await response.arrayBuffer());
+}
 
 /** 与 imageSkill.resolveWorkflowPath 一致的模式兜底：无记录时按全局模式 + 场景映射 */
 function fallbackModeForScene(scene) {
@@ -261,15 +282,25 @@ export async function refineImage({
   }
 
   const img = result.images[0];
-  const base64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
+  const outputBuffer = isArtifactImage(img)
+    ? await downloadPublicArtifact(img.artifactId)
+    : (typeof img.base64 === 'string'
+      ? Buffer.from(img.base64.replace(/^data:image\/\w+;base64,/, ''), 'base64')
+      : null);
+  if (!outputBuffer || outputBuffer.length === 0) throw new Error('细化结果没有可读取的图片内容');
 
   if (output === 'buffer') {
     console.log('[imageRefine] Refined image returned in memory (not saved)');
-    return { success: true, wfPath: hiresPath(), filename: img.filename, base64: img.base64 };
+    return {
+      success: true,
+      wfPath: hiresPath(),
+      filename: img.filename,
+      base64: `data:${img.contentType || 'image/png'};base64,${outputBuffer.toString('base64')}`,
+    };
   }
   const target = outPath || filePath;
   const tmpPath = target + '.refining';
-  fs.writeFileSync(tmpPath, Buffer.from(base64, 'base64'));
+  fs.writeFileSync(tmpPath, outputBuffer);
   fs.renameSync(tmpPath, target);
 
   console.log(`[imageRefine] Refined image saved (overwrote): ${target}`);
