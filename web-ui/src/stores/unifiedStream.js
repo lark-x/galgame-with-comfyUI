@@ -25,6 +25,11 @@ let _reconnectTimer = null
 let _stableTimer = null
 let _started = false
 let _backoff = BACKOFF_INITIAL
+let _connected = false
+let _connectAttempts = 0
+let _reconnectCount = 0
+let _lastConnectedAt = null
+let _lastDisconnectedAt = null
 
 /** Map<eventType, Set<handler>> */
 const _handlers = new Map()
@@ -64,8 +69,14 @@ function _dispatch(eventType, data) {
 function _connect() {
   if (_conn && !_conn._closed) _conn.close()
 
+  _connectAttempts++
+
   _conn = api.connectUnifiedStream({
-    connected:         () => { _stableTimer = setTimeout(_onStable, 15000) },
+    connected:         () => {
+      _connected = true
+      _lastConnectedAt = new Date().toISOString()
+      _stableTimer = setTimeout(_onStable, 15000)
+    },
     new_event:         d => _dispatch('new_event', d),
     event_update:      d => _dispatch('event_update', d),
     event_concluded:   d => _dispatch('event_concluded', d),
@@ -105,6 +116,9 @@ function _onStable() {
 /** 断开后立即调度重连（指数退避 1s→2s→4s→...→30s） */
 function _scheduleReconnect() {
   if (!_started) return
+  _connected = false
+  _reconnectCount++
+  _lastDisconnectedAt = new Date().toISOString()
   if (_reconnectTimer) clearTimeout(_reconnectTimer)
   if (_stableTimer) { clearTimeout(_stableTimer); _stableTimer = null }
 
@@ -128,8 +142,21 @@ export function startUnifiedStream() {
 /** 停止统一 SSE 连接（NavBar onUnmounted 调用） */
 export function stopUnifiedStream() {
   _started = false
+  _connected = false
   _backoff = BACKOFF_INITIAL
   if (_conn) { _conn.close(); _conn = null }
   if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null }
   if (_stableTimer) { clearTimeout(_stableTimer); _stableTimer = null }
+}
+
+/** 供设置页诊断使用；不包含消息内容、密钥或任何用户数据。 */
+export function getUnifiedStreamDiagnostics() {
+  return {
+    started: _started,
+    connected: _connected,
+    connectAttempts: _connectAttempts,
+    reconnectCount: _reconnectCount,
+    lastConnectedAt: _lastConnectedAt,
+    lastDisconnectedAt: _lastDisconnectedAt,
+  }
 }

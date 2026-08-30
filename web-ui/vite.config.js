@@ -6,9 +6,11 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    // Quick Tunnel forwards its random *.trycloudflare.com Host header.
-    // Keep the allow-list scoped to Cloudflare's temporary tunnel domain.
-    allowedHosts: ['.trycloudflare.com'],
+    // Cloudflare Tunnel preserves the public Host header. Keep both the
+    // temporary Quick Tunnel suffix and the stable self-hosted hostname in
+    // the allow-list; Vite otherwise returns "Blocked request" before the
+    // request can reach the Vue app.
+    allowedHosts: ['.trycloudflare.com', 'linshe.0000114.xyz'],
     proxy: {
       '/api': {
         target: 'http://localhost:3099',

@@ -2,8 +2,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
+import { createRequestGate } from '../utils/requestGate.js'
 
 export const useMailboxStore = defineStore('mailbox', () => {
+  const lettersGate = createRequestGate(30_000)
+  const unreadGate = createRequestGate(60_000)
   const letters = ref([])
   const unreadCount = ref(0)
   const processingCount = ref(0)
@@ -21,11 +24,14 @@ export const useMailboxStore = defineStore('mailbox', () => {
     letters.value.filter(l => l.status === 'completed')
   )
 
-  async function fetchLetters() {
+  async function fetchLetters(force = false) {
     loading.value = true
     try {
-      const data = await api.listLetters()
-      letters.value = data.letters || []
+      return await lettersGate.run(async () => {
+        const data = await api.listLetters()
+        letters.value = data.letters || []
+        return letters.value
+      }, { force })
     } catch (err) {
       console.error('[mailbox] fetchLetters error:', err)
     } finally {
@@ -33,11 +39,14 @@ export const useMailboxStore = defineStore('mailbox', () => {
     }
   }
 
-  async function fetchUnread() {
+  async function fetchUnread(force = false) {
     try {
-      const data = await api.getUnreadCount()
-      unreadCount.value = data.unread || 0
-      processingCount.value = data.processing || 0
+      return await unreadGate.run(async () => {
+        const data = await api.getUnreadCount()
+        unreadCount.value = data.unread || 0
+        processingCount.value = data.processing || 0
+        return data
+      }, { force })
     } catch (err) {
       console.error('[mailbox] fetchUnread error:', err)
     }
@@ -56,14 +65,14 @@ export const useMailboxStore = defineStore('mailbox', () => {
     const letter = letters.value.find(l => l.id === letterId)
     if (letter) {
       letter.is_read = 1
-      fetchUnread()
+      fetchUnread(true)
     }
   }
 
   async function deleteLetter(letterId) {
     await api.deleteLetter(letterId)
     letters.value = letters.value.filter(l => l.id !== letterId)
-    fetchUnread()
+    fetchUnread(true)
   }
 
   function _onReplyProcessing(data) {
@@ -72,7 +81,7 @@ export const useMailboxStore = defineStore('mailbox', () => {
     if (letter) {
       letter.status = 'processing'
     }
-    fetchUnread()
+    fetchUnread(true)
   }
 
   function _onReplyReady(data) {
@@ -88,9 +97,9 @@ export const useMailboxStore = defineStore('mailbox', () => {
       letter.handwriting_font = data.handwriting_font || ''
       letter.is_read = 0
     } else {
-      fetchLetters()
+      fetchLetters(true)
     }
-    fetchUnread()
+    fetchUnread(true)
   }
 
   function startPolling() {
@@ -107,9 +116,9 @@ export const useMailboxStore = defineStore('mailbox', () => {
     _unsubReady = onEvent('reply_ready', _onReplyReady)
 
     pollTimer = setInterval(() => {
-      fetchUnread()
+      fetchUnread(true)
       if (letters.value.some(l => l.status === 'pending' || l.status === 'processing')) {
-        fetchLetters()
+        fetchLetters(true)
       }
     }, 60000)
   }

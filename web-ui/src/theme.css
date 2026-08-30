@@ -1,0 +1,1132 @@
+/*
+ * Linshe visual system
+ *
+ * View components intentionally keep their local layout rules. This file is
+ * the shared visual layer that gives every route the same skin: shell, page
+ * canvas, surfaces, controls, dialogs and status accents. Keeping it outside
+ * App.vue also makes new skins additive instead of another long selector list.
+ */
+
+:root {
+  --surface-0: var(--bg-primary);
+  --surface-1: var(--bg-secondary);
+  --surface-2: var(--bg-tertiary);
+  --surface-elevated: var(--glass-bg);
+  --control-bg: var(--input-bg);
+  --control-hover: var(--bg-hover);
+  --panel-border: var(--border);
+  --divider: var(--border);
+  --shell-text: var(--text-primary);
+  --shell-muted: var(--text-secondary);
+  --soft-accent: color-mix(in srgb, var(--accent) 12%, transparent);
+  --card-radius: 18px;
+  --page-gutter: 32px;
+  --content-max: 1440px;
+  --nav-width: 78px;
+  --sidebar-width: 292px;
+  --shadow-card: var(--glass-shadow);
+  --shadow-float: 0 18px 46px rgba(0, 0, 0, 0.16);
+}
+
+html[data-linshe-theme="default"] {
+  --bg-primary: #f0ece8;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #ebebeb;
+  --bg-hover: #e0e0e0;
+  --border: #e0dcd6;
+  --text-primary: #333333;
+  --text-secondary: #8c8074;
+  --text-bright: #111111;
+  --accent: #e07b6c;
+  --accent-hover: #cc6a5c;
+  --accent-light: #f0a89a;
+  --success: #52c41a;
+  --warning: #faad14;
+  --danger: #ff4d4f;
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-bg-strong: rgba(255, 255, 255, 0.38);
+  --glass-border: rgba(255, 255, 255, 0.28);
+  --glass-shadow: 0 2px 16px rgba(0, 0, 0, 0.03);
+  --glass-blur: blur(18px);
+  --input-bg: rgba(255, 255, 255, 0.9);
+  --input-border: #d5d0ca;
+  --button-text: #ffffff;
+  --accent-rgb: 224, 123, 108;
+  --accent-shadow: rgba(224, 123, 108, 0.25);
+  --shell-bg: rgba(255, 255, 255, 0.45);
+  --shell-hover: rgba(255, 255, 255, 0.28);
+  --shell-active: rgba(224, 123, 108, 0.1);
+  --shell-border: rgba(255, 255, 255, 0.25);
+  --page-decoration:
+    radial-gradient(ellipse 65% 55% at 15% 15%, rgba(240, 168, 154, 0.35), transparent 70%),
+    radial-gradient(ellipse 60% 55% at 85% 85%, rgba(254, 215, 170, 0.3), transparent 70%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(254, 205, 211, 0.25), transparent 70%);
+  --page-pattern: none;
+  --page-decoration-opacity: 1;
+  --scrim-bg: rgba(0, 0, 0, 0.45);
+  --message-user-bg: #a25740;
+  --message-user-text: #e8e8e8;
+  --message-assistant-bg: #ffffff;
+  --surface-0: #f0ece8;
+  --surface-1: #ffffff;
+  --surface-2: #ebebeb;
+  --surface-elevated: rgba(255, 255, 255, 0.6);
+  --control-bg: rgba(255, 255, 255, 0.9);
+  --control-hover: #e0e0e0;
+  --panel-border: #e0dcd6;
+  --divider: #e0dcd6;
+  --shell-text: #333333;
+  --shell-muted: #8c8074;
+  --soft-accent: rgba(224, 123, 108, 0.12);
+  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.03);
+  --shadow-float: 0 18px 46px rgba(60, 42, 34, 0.12);
+}
+
+html[data-linshe-theme="elemental"] {
+  --bg-primary: #f5efe3;
+  --bg-secondary: #fffdf9;
+  --bg-tertiary: #ebe3d3;
+  --bg-hover: #dfd5c2;
+  --border: #d4c4a8;
+  --text-primary: #28373b;
+  --text-secondary: #6e7e82;
+  --text-bright: #122429;
+  --accent: #2baaa4;
+  --accent-hover: #1f8f89;
+  --accent-light: #6bcac5;
+  --success: #3ea07a;
+  --warning: #d49339;
+  --danger: #d9534f;
+  --glass-bg: rgba(255, 253, 249, 0.88);
+  --glass-bg-strong: rgba(255, 255, 255, 0.95);
+  --glass-border: rgba(212, 196, 168, 0.55);
+  --glass-shadow: 0 4px 20px rgba(40, 55, 59, 0.06);
+  --glass-blur: blur(16px);
+  --input-bg: rgba(255, 250, 239, 0.96);
+  --input-border: #d4c4a8;
+  --button-text: #ffffff;
+  --accent-rgb: 43, 170, 164;
+  --accent-shadow: rgba(43, 170, 164, 0.26);
+  --shell-bg: rgba(245, 239, 227, 0.85);
+  --shell-hover: rgba(43, 170, 164, 0.12);
+  --shell-active: rgba(43, 170, 164, 0.18);
+  --shell-border: rgba(212, 196, 168, 0.5);
+  --page-decoration:
+    radial-gradient(ellipse 65% 55% at 15% 15%, rgba(43, 170, 164, 0.32), transparent 70%),
+    radial-gradient(ellipse 60% 55% at 85% 85%, rgba(234, 179, 8, 0.25), transparent 70%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(107, 202, 197, 0.2), transparent 70%);
+  --page-pattern: none;
+  --page-decoration-opacity: 1;
+  --scrim-bg: rgba(18, 36, 41, 0.5);
+  --message-user-bg: #27948f;
+  --message-user-text: #ffffff;
+  --message-assistant-bg: #fffdf9;
+  --surface-0: #f5efe3;
+  --surface-1: #fffdf9;
+  --surface-2: #ebe3d3;
+  --surface-elevated: rgba(255, 253, 249, 0.88);
+  --control-bg: rgba(255, 255, 255, 0.95);
+  --control-hover: #dfd5c2;
+  --panel-border: #d4c4a8;
+  --divider: rgba(212, 196, 168, 0.6);
+  --shell-text: #28373b;
+  --shell-muted: #6e7e82;
+  --soft-accent: rgba(43, 170, 164, 0.12);
+  --shadow-card: 0 4px 20px rgba(40, 55, 59, 0.06);
+  --shadow-float: 0 16px 42px rgba(40, 55, 59, 0.14);
+}
+
+html[data-linshe-theme="ink"] {
+  --bg-primary: #f4efe6;
+  --bg-secondary: #fffdfa;
+  --bg-tertiary: #e9e1d4;
+  --bg-hover: #ddd3c3;
+  --border: #d1c4b2;
+  --text-primary: #2d3339;
+  --text-secondary: #777067;
+  --text-bright: #181d22;
+  --accent: #bd4f3e;
+  --accent-hover: #a33d2d;
+  --accent-light: #db7c6d;
+  --success: #4d8f68;
+  --warning: #be833a;
+  --danger: #c54343;
+  --glass-bg: rgba(255, 253, 250, 0.92);
+  --glass-bg-strong: rgba(255, 255, 255, 0.96);
+  --glass-border: rgba(209, 196, 178, 0.6);
+  --glass-shadow: 0 4px 18px rgba(45, 51, 57, 0.05);
+  --glass-blur: blur(16px);
+  --input-bg: #ffffff;
+  --input-border: #d1c4b2;
+  --button-text: #ffffff;
+  --accent-rgb: 189, 79, 62;
+  --accent-shadow: rgba(189, 79, 62, 0.24);
+  --shell-bg: rgba(244, 239, 230, 0.9);
+  --shell-hover: rgba(189, 79, 62, 0.1);
+  --shell-active: rgba(189, 79, 62, 0.16);
+  --shell-border: rgba(209, 196, 178, 0.55);
+  --page-decoration:
+    radial-gradient(ellipse 65% 55% at 15% 15%, rgba(189, 79, 62, 0.25), transparent 70%),
+    radial-gradient(ellipse 60% 55% at 85% 85%, rgba(217, 119, 6, 0.2), transparent 70%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(180, 150, 130, 0.18), transparent 70%);
+  --page-pattern: none;
+  --page-decoration-opacity: 1;
+  --scrim-bg: rgba(24, 29, 34, 0.5);
+  --message-user-bg: #a84233;
+  --message-user-text: #ffffff;
+  --message-assistant-bg: #fffdfa;
+  --surface-0: #f4efe6;
+  --surface-1: #fffdfa;
+  --surface-2: #e9e1d4;
+  --surface-elevated: rgba(255, 253, 250, 0.92);
+  --control-bg: #ffffff;
+  --control-hover: #ddd3c3;
+  --panel-border: #d1c4b2;
+  --divider: rgba(209, 196, 178, 0.65);
+  --shell-text: #2d3339;
+  --shell-muted: #777067;
+  --soft-accent: rgba(189, 79, 62, 0.12);
+  --shadow-card: 0 4px 18px rgba(45, 51, 57, 0.05);
+  --shadow-float: 0 16px 40px rgba(45, 51, 57, 0.12);
+}
+
+html[data-linshe-theme="breeze"] {
+  --bg-primary: #eef4fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e0ecf7;
+  --bg-hover: #d3e3f2;
+  --border: #c4d7ea;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-bright: #0f172a;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-light: #60a5fa;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-bg-strong: rgba(255, 255, 255, 0.95);
+  --glass-border: rgba(196, 215, 234, 0.6);
+  --glass-shadow: 0 4px 20px rgba(30, 41, 59, 0.05);
+  --glass-blur: blur(16px);
+  --input-bg: rgba(255, 255, 255, 0.95);
+  --input-border: #c4d7ea;
+  --button-text: #ffffff;
+  --accent-rgb: 59, 130, 246;
+  --accent-shadow: rgba(59, 130, 246, 0.25);
+  --shell-bg: rgba(238, 244, 250, 0.88);
+  --shell-hover: rgba(59, 130, 246, 0.12);
+  --shell-active: rgba(59, 130, 246, 0.18);
+  --shell-border: rgba(196, 215, 234, 0.55);
+  --page-decoration:
+    radial-gradient(ellipse 65% 55% at 15% 15%, rgba(59, 130, 246, 0.32), transparent 70%),
+    radial-gradient(ellipse 60% 55% at 85% 85%, rgba(56, 189, 248, 0.3), transparent 70%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(147, 197, 253, 0.24), transparent 70%);
+  --page-pattern: none;
+  --page-decoration-opacity: 1;
+  --scrim-bg: rgba(15, 23, 42, 0.5);
+  --message-user-bg: #2563eb;
+  --message-user-text: #ffffff;
+  --message-assistant-bg: #ffffff;
+  --surface-0: #eef4fa;
+  --surface-1: #ffffff;
+  --surface-2: #e0ecf7;
+  --surface-elevated: rgba(255, 255, 255, 0.85);
+  --control-bg: rgba(255, 255, 255, 0.95);
+  --control-hover: #d3e3f2;
+  --panel-border: #c4d7ea;
+  --divider: rgba(196, 215, 234, 0.65);
+  --shell-text: #1e293b;
+  --shell-muted: #64748b;
+  --soft-accent: rgba(59, 130, 246, 0.12);
+  --shadow-card: 0 4px 20px rgba(30, 41, 59, 0.05);
+  --shadow-float: 0 16px 40px rgba(30, 41, 59, 0.12);
+}
+
+html[data-linshe-theme="matcha"] {
+  --bg-primary: #edf5ee;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #ddeedd;
+  --bg-hover: #cfe2cf;
+  --border: #bfd6bf;
+  --text-primary: #1f2e23;
+  --text-secondary: #5f7564;
+  --text-bright: #0f1c12;
+  --accent: #2e9e5b;
+  --accent-hover: #22864b;
+  --accent-light: #5ec785;
+  --success: #22c55e;
+  --warning: #eab308;
+  --danger: #ef4444;
+  --glass-bg: rgba(255, 255, 255, 0.88);
+  --glass-bg-strong: rgba(255, 255, 255, 0.96);
+  --glass-border: rgba(191, 214, 191, 0.6);
+  --glass-shadow: 0 4px 20px rgba(31, 46, 35, 0.05);
+  --glass-blur: blur(16px);
+  --input-bg: rgba(255, 255, 255, 0.95);
+  --input-border: #bfd6bf;
+  --button-text: #ffffff;
+  --accent-rgb: 46, 158, 91;
+  --accent-shadow: rgba(46, 158, 91, 0.25);
+  --shell-bg: rgba(237, 245, 238, 0.88);
+  --shell-hover: rgba(46, 158, 91, 0.12);
+  --shell-active: rgba(46, 158, 91, 0.18);
+  --shell-border: rgba(191, 214, 191, 0.55);
+  --page-decoration:
+    radial-gradient(ellipse 65% 55% at 15% 15%, rgba(46, 158, 91, 0.3), transparent 70%),
+    radial-gradient(ellipse 60% 55% at 85% 85%, rgba(132, 204, 22, 0.26), transparent 70%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(167, 243, 208, 0.24), transparent 70%);
+  --page-pattern: none;
+  --page-decoration-opacity: 1;
+  --scrim-bg: rgba(15, 28, 18, 0.5);
+  --message-user-bg: #258f4f;
+  --message-user-text: #ffffff;
+  --message-assistant-bg: #ffffff;
+  --surface-0: #edf5ee;
+  --surface-1: #ffffff;
+  --surface-2: #ddeedd;
+  --surface-elevated: rgba(255, 255, 255, 0.88);
+  --control-bg: rgba(255, 255, 255, 0.95);
+  --control-hover: #cfe2cf;
+  --panel-border: #bfd6bf;
+  --divider: rgba(191, 214, 191, 0.65);
+  --shell-text: #1f2e23;
+  --shell-muted: #5f7564;
+  --soft-accent: rgba(46, 158, 91, 0.12);
+  --shadow-card: 0 4px 20px rgba(31, 46, 35, 0.05);
+  --shadow-float: 0 16px 40px rgba(31, 46, 35, 0.12);
+}
+
+/* The page canvas and typography are shared by every non-default skin. */
+html[data-linshe-theme]:not([data-linshe-theme="default"]) body,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) #app {
+  color: var(--text-primary);
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .page-host {
+  background: transparent;
+}
+
+/* Desktop shell: wider, calmer navigation with an intentional dark frame. */
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .nav-bar,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar {
+  background: var(--shell-bg) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-color: var(--shell-border) !important;
+  color: var(--shell-text) !important;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.03) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .nav-bar .nav-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .group-section-header,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .char-preview,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .char-time,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .char-schedule,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .footer-nav-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .footer-more-btn {
+  color: var(--shell-muted) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .nav-bar .nav-item:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .char-item:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .footer-nav-btn:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .footer-more-btn:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .group-create-btn:hover {
+  background: var(--shell-hover) !important;
+  color: var(--shell-text) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .nav-bar .nav-item.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .char-item.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .footer-nav-btn.active {
+  background: var(--shell-active) !important;
+  color: var(--text-bright) !important;
+  box-shadow: 0 2px 12px var(--accent-shadow) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .char-list {
+  background: color-mix(in srgb, var(--surface-1) 50%, transparent) !important;
+  border-radius: 12px;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .char-name,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .group-section-header span {
+  color: var(--shell-text) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar .sidebar-footer {
+  border-top-color: var(--shell-border) !important;
+}
+
+/* Route chrome. The selectors cover the different names used by older views. */
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-header,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moments-header,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .events-topbar,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .main-topbar,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gallery-header,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mailbox-topbar,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .schedule-header,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .page-header {
+  background: var(--shell-bg) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-color: var(--shell-border) !important;
+  color: var(--shell-text) !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.03) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moments-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .topbar-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gallery-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mailbox-topbar .topbar-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .page-header h2,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-header-schedule,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .header-affinity,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .header-reason {
+  color: var(--shell-text) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .topbar-actions button,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-mobile-back,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-header-settings,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .topbar-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .back {
+  border-color: var(--shell-border) !important;
+  background: var(--shell-hover) !important;
+  color: var(--shell-text) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .topbar-actions button:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-mobile-back:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-header-settings:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .topbar-btn:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .back:hover {
+  background: var(--shell-active) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-light) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-view,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moments-view,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .events-page,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .schedule-view,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gallery-view,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mailbox-view,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .tavern-view,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-page,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .settings-view,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .maibot-page {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+}
+
+/* Shared surfaces. These override old route-local colors but not layout. */
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .letter-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moment-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .event-preview,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .event-share-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .item-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .status-card .card-inner,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .status-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .preview-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .lora-body-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .lora-item-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mailbox-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .user-row-wrapper,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .share-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-content,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-outgoing,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-replied,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .paper-frame,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .paper-content,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gc-drawer,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .avatar-pop-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mention-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .new-message-bubble,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gc-member-check,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .custom-modal,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .modal-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .modal-box,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .modal-body,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .modal-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .picker-dialog,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .picker-dropdown,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .settings-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .editor-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fav-dialog,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .cg-dialog,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .disturb-dialog,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .wf-mode-modal,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .prompt-editor-modal,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .more-menu-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .advanced-settings,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .recall-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .job-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .managed-status-box,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .theme-picker,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .lib-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .confirm-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-modal-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gift-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gift-panel-content,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gift-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .ded-modal,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .ded-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .stat-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mail-list-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mail-detail-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mailbox-modal,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .proactive-chat-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .impression-panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .group-create-dialog,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .group-member-box,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .hires-preview,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .letter-write-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .prompt-editor-trigger,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .settings-nav {
+  background: var(--surface-elevated) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-color: var(--panel-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--shadow-card) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Sub-surfaces, interactive pills, tabs and tags */
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comfy-tabs {
+  background: color-mix(in srgb, var(--surface-1) 85%, transparent) !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--divider) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comfy-tab,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .setting-tab,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .preset-pill,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .pbtn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fav-chip,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .prompt-editor-tag,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .prompt-editor-tag-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .prompt-editor-insert-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .wf-mode-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .wf-action-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fav-row,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .cg-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .disturb-char-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-settings-entry,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .custom-badge,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .float-badge,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .avatar-pop-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mention-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .more-menu-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .hires-tabs,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .hires-tab,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-step,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-nav-pill,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .ded-act,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-rel-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .recruit-source-tabs,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .recruit-source-tabs button,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .impression-header,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .impression-group-bar,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .impression-content-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .role-box,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-check-box,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fav-input-row,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .free-scene-input-wrap,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .generated-prompt-box,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .filter-tab {
+  background: color-mix(in srgb, var(--surface-1) 85%, transparent) !important;
+  border-color: var(--divider) !important;
+  border-radius: 9px;
+  color: var(--text-primary) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comfy-tab.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .setting-tab.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .preset-pill.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .pbtn.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fav-chip.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .wf-mode-btn.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fav-row.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .cg-item.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .disturb-char-item.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .float-badge.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gc-member-check.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gc-member-check.selected,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .hires-tab.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-nav-pill.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .recruit-source-tabs button.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gift-card.selected,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .ded-item.confirmed,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .filter-tab.active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-1)) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-light, var(--accent)) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comfy-tab.active::after {
+  background: var(--accent) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .hiresfix-section,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .quality-section {
+  border-color: var(--divider) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .hiresfix-link,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .quality-link {
+  color: var(--accent) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gift-name { color: var(--text-bright) !important; }
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gift-desc { color: var(--text-secondary) !important; }
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gift-price { color: var(--accent) !important; }
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gift-card.locked {
+  opacity: 0.65 !important;
+  background: color-mix(in srgb, var(--surface-0) 65%, transparent) !important;
+  border-color: var(--divider) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-head,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-foot,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .confirm-actions,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-modal-head,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-modal-actions,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .lib-header {
+  border-color: var(--divider) !important;
+  background: color-mix(in srgb, var(--surface-1) 68%, transparent) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-title-wrap h3,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-title-wrap p,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-body,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-step-body,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .confirm-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .confirm-message,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-card-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-modal-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-modal-hint,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .lib-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card-desc,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-section,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-step-title {
+  color: var(--text-primary) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-ok,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .confirm-btn-ok,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-btn-primary,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gen-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .preview-btn.primary,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mini-btn.primary,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gc-btn-primary,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-compose {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--button-text) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-close,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .confirm-btn-cancel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-btn-ghost,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-btn-danger,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .lib-close,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .custom-modal-close {
+  background: var(--soft-accent) !important;
+  color: var(--text-secondary) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .live-toast {
+  background: var(--surface-elevated) !important;
+  border-color: var(--panel-border) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-float) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .live-toast-message,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .live-toast-note,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .live-toast-close {
+  color: var(--text-primary) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guide-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .confirm-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .iet-modal,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .lib-overlay {
+  background: var(--scrim-bg) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .letter-card:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .picker-item:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .admin-link:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-item:hover {
+  background: var(--soft-accent) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moment-header,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moment-actions,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comments-section,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comment-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .event-preview .preview-footer,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .event-preview .preview-meta-row,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .diagnostic-item,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .managed-role-card,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .public-character-row {
+  border-color: var(--divider) !important;
+  background-color: color-mix(in srgb, var(--surface-1) 58%, transparent) !important;
+  color: var(--text-primary) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .history-section,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .history-header,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sched-sidebar,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .panel-list,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .panel-detail,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .compose-panel {
+  background: transparent !important;
+  border-color: var(--divider) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .preview-name,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .event-share-card .card-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moment-name,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moment-content,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-text,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-original,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .paper-textarea,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .compose-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card-body,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-judgment {
+  color: var(--text-primary) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moment-time,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .preview-meta,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .countdown-label,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comment-user-name,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comment-reply-to,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card-preview,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .waiting-estimate,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .paper-textarea::placeholder {
+  color: var(--text-secondary) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moment-more-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card-more-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .action-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comment-send,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-compose-empty,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-cancel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .compose-back {
+  background: var(--soft-accent) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--panel-border) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .comment-send,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-send {
+  background: var(--accent) !important;
+  color: var(--button-text) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card h3,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card h2,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .section-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .conversation-label,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .empty-title,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-header-name,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card-name,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .field-label,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fl,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .admin-link-name {
+  color: var(--text-bright) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fd,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .hint,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .page-header p,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card p,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .empty-hint,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .card-preview,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-header-meta,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .detail-meta,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .admin-link-url,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .admin-link-token,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .state-loading,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .state-empty {
+  color: var(--text-secondary) !important;
+}
+
+/* All form controls use the selected skin, including the many legacy .fi inputs. */
+html[data-linshe-theme]:not([data-linshe-theme="default"]) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html[data-linshe-theme]:not([data-linshe-theme="default"]) textarea,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) select,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fi,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-input,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .search-input,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .custom-modal-input,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .paper-textarea,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .editor-input,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .editor-textarea,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .preview-name-input {
+  background: var(--control-bg) !important;
+  border-color: var(--panel-border) !important;
+  color: var(--text-bright) !important;
+  caret-color: var(--accent) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) input::placeholder,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) textarea::placeholder,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-input::placeholder {
+  color: var(--text-secondary) !important;
+  opacity: 0.8;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) input:focus,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) textarea:focus,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) select:focus,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fi:focus,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-input:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent) !important;
+}
+
+/* Actions and status surfaces. */
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-primary,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-post,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-custom,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-start-inline,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .send-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-empty-pick,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .cg-submit,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .cg-submit-desktop {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--button-text) !important;
+  box-shadow: 0 5px 18px var(--accent-shadow);
+  border-radius: 8px !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-primary:hover:not(:disabled),
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-post:hover:not(:disabled),
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-custom:hover:not(:disabled),
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .send-btn:hover:not(:disabled),
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-empty-pick:hover:not(:disabled) {
+  background: var(--accent-hover) !important;
+  color: var(--button-text) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-ghost,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-glass,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sp-btn-small,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .test-mode-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .toggle-btn,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .filter-avatar.filter-all {
+  background: var(--soft-accent) !important;
+  border-color: var(--panel-border) !important;
+  color: var(--text-primary) !important;
+  border-radius: 8px !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-ghost:hover:not(:disabled),
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .btn-glass:hover:not(:disabled),
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .test-mode-btn:hover,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .filter-avatar:hover:not(.active) {
+  background: var(--control-hover) !important;
+  color: var(--text-bright) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .filter-avatar.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .filter-all.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .test-mode-btn.active,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .toggle-btn.active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--button-text) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .message.user .msg-bubble {
+  background: var(--message-user-bg) !important;
+  color: var(--message-user-text) !important;
+  border-color: transparent !important;
+  border-radius: 16px 4px 16px 16px !important;
+  box-shadow: 0 5px 18px color-mix(in srgb, var(--message-user-bg) 28%, transparent);
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .message.assistant .msg-bubble {
+  background: var(--message-assistant-bg) !important;
+  border-color: var(--panel-border) !important;
+  color: var(--text-primary) !important;
+  border-radius: 4px 16px 16px 16px !important;
+  box-shadow: var(--shadow-card);
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .input-area,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .force-img-toggle,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .guess-pill {
+  background: var(--surface-elevated) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-color: var(--panel-border) !important;
+  border-radius: 12px !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .custom-modal-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .modal-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .picker-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gc-drawer-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .avatar-pop-layer,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .fav-dialog-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .disturb-dialog-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .wf-mode-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .mobile-scrim,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .editor-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .gift-panel-overlay,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .settings-overlay {
+  background: var(--scrim-bg) !important;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-view .message-list,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .moments-feed,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .events-scroll,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .sched-main,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .panel,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .settings-view,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .tavern-view,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-page,
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .maibot-page {
+  scrollbar-color: color-mix(in srgb, var(--accent) 55%, var(--border)) transparent;
+}
+
+html[data-linshe-theme]:not([data-linshe-theme="default"]) .api-key-banner {
+  background: color-mix(in srgb, var(--danger) 86%, #000 14%) !important;
+}
+
+/* Larger screens get a more deliberate content rhythm; mobile keeps the route layouts. */
+@media (min-width: 768px) {
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .nav-bar {
+    width: var(--nav-width) !important;
+    min-width: var(--nav-width) !important;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .sidebar {
+    width: var(--sidebar-width) !important;
+    min-width: var(--sidebar-width) !important;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .settings-view,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .tavern-view,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-page,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .maibot-page {
+    padding: var(--page-gutter) clamp(24px, 3vw, 52px) !important;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .settings-view > *,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .tavern-view > *,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-page > *,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .maibot-page > * {
+    width: min(100%, var(--content-max));
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .settings-view .settings-grid,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .maibot-page .settings-grid {
+    gap: 20px;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .moments-feed {
+    padding-left: clamp(24px, 4vw, 56px) !important;
+    padding-right: clamp(24px, 4vw, 56px) !important;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .moments-filter-bar,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .moments-list {
+    max-width: 760px;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .events-content,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .history-section {
+    width: min(100%, 1240px);
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .waterfall-row {
+    gap: 18px;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-header,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .moments-header,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .events-topbar,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .main-topbar,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .gallery-header,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .mailbox-topbar {
+    padding-left: clamp(24px, 3vw, 48px) !important;
+    padding-right: clamp(24px, 3vw, 48px) !important;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .theme-options {
+    gap: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .settings-view,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .tavern-view,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .memory-page,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .maibot-page {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .page-header {
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .chat-header,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .moments-header,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .events-topbar,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .main-topbar,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .gallery-header,
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .mailbox-topbar {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  html[data-linshe-theme]:not([data-linshe-theme="default"]) .more-menu-panel {
+    border: 1px solid var(--panel-border);
+    border-bottom: 0;
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   FX Mode: Dynamic Aura vs Static Clean
+   ══════════════════════════════════════════════════ */
+@keyframes ambientDrift {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: var(--page-decoration-opacity);
+  }
+  33% {
+    transform: translate3d(2.5%, -2%, 0) scale(1.08);
+    opacity: calc(var(--page-decoration-opacity) * 1.15);
+  }
+  66% {
+    transform: translate3d(-2%, 2.5%, 0) scale(1.04);
+    opacity: calc(var(--page-decoration-opacity) * 0.9);
+  }
+}
+
+@keyframes activePulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.32);
+  }
+  50% {
+    box-shadow: 0 0 14px 2px rgba(var(--accent-rgb), 0.22);
+  }
+}
+
+@keyframes buttonShimmer {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+html[data-linshe-fx="dynamic"] body::before,
+body[data-linshe-fx="dynamic"]::before {
+  animation: ambientDrift 22s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite alternate;
+  filter: blur(35px);
+  will-change: transform, opacity;
+}
+
+html[data-linshe-fx="dynamic"] .card,
+html[data-linshe-fx="dynamic"] .moment-card,
+html[data-linshe-fx="dynamic"] .item-card,
+html[data-linshe-fx="dynamic"] .preview-card,
+html[data-linshe-fx="dynamic"] .modal-card,
+html[data-linshe-fx="dynamic"] .custom-modal,
+html[data-linshe-fx="dynamic"] .theme-picker {
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+html[data-linshe-fx="dynamic"] .moment-card:hover,
+html[data-linshe-fx="dynamic"] .item-card:hover,
+html[data-linshe-fx="dynamic"] .event-preview:hover,
+html[data-linshe-fx="dynamic"] .preview-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08), 0 0 14px var(--soft-accent) !important;
+}
+
+html[data-linshe-fx="dynamic"] .sidebar .char-item.active {
+  animation: activePulse 3.5s ease-in-out infinite;
+}
+
+html[data-linshe-fx="dynamic"] .btn-primary,
+html[data-linshe-fx="dynamic"] .send-btn,
+html[data-linshe-fx="dynamic"] .btn-empty-pick,
+html[data-linshe-fx="dynamic"] .btn-post,
+html[data-linshe-fx="dynamic"] .btn-custom {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 50%, var(--accent) 100%) !important;
+  background-size: 200% 200% !important;
+  animation: buttonShimmer 6s ease infinite;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease;
+}
+
+html[data-linshe-fx="dynamic"] .btn-primary:hover,
+html[data-linshe-fx="dynamic"] .send-btn:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 20px var(--accent-shadow) !important;
+}
+
+html[data-linshe-fx="dynamic"] .btn-primary:active,
+html[data-linshe-fx="dynamic"] .send-btn:active,
+html[data-linshe-fx="dynamic"] .btn-empty-pick:active,
+html[data-linshe-fx="dynamic"] .btn-post:active,
+html[data-linshe-fx="dynamic"] .btn-custom:active {
+  transform: scale(0.96) !important;
+}
+
+html[data-linshe-fx="dynamic"] .setting-tab:hover:not(.active),
+html[data-linshe-fx="dynamic"] .preset-pill:hover:not(.active),
+html[data-linshe-fx="dynamic"] .wf-mode-btn:hover:not(.active) {
+  transform: translateY(-1px);
+}
+
+html[data-linshe-fx="static"] body::before,
+body[data-linshe-fx="static"]::before {
+  animation: none !important;
+  transform: none !important;
+  filter: none !important;
+}
+
+html[data-linshe-fx="static"] .btn-primary,
+html[data-linshe-fx="static"] .send-btn,
+html[data-linshe-fx="static"] .sidebar .char-item.active {
+  animation: none !important;
+}
+
+html[data-linshe-fx="static"] .card,
+html[data-linshe-fx="static"] .moment-card,
+html[data-linshe-fx="static"] .item-card {
+  transform: none !important;
+}

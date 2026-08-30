@@ -11,8 +11,10 @@ import { ref, computed, reactive } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
 import { normalizeImages } from '../utils/imageReferences.js'
+import { createRequestGate } from '../utils/requestGate.js'
 
 export const useGroupsStore = defineStore('groups', () => {
+  const groupListGate = createRequestGate(30_000)
   const groups = ref([])
   const activeGroupId = ref(null)
   const activeGroup = computed(() => groups.value.find(g => g.id === activeGroupId.value) || null)
@@ -88,21 +90,24 @@ export const useGroupsStore = defineStore('groups', () => {
     groups.value.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0))
   }
 
-  async function loadGroups() {
+  async function loadGroups(force = false) {
     try {
-      const data = await api.listGroups()
-      const previous = new Map(groups.value.map(group => [group.id, group]))
-      groups.value = (data.groups || []).map(group => {
-        const old = previous.get(group.id)
-        const session = _getSession(group.id)
-        if (!old || !session?.loaded) return group
-        return {
-          ...group,
-          last_message: old.last_message,
-          last_message_id: old.last_message_id,
-          last_message_at: old.last_message_at,
-        }
-      })
+      return await groupListGate.run(async () => {
+        const data = await api.listGroups()
+        const previous = new Map(groups.value.map(group => [group.id, group]))
+        groups.value = (data.groups || []).map(group => {
+          const old = previous.get(group.id)
+          const session = _getSession(group.id)
+          if (!old || !session?.loaded) return group
+          return {
+            ...group,
+            last_message: old.last_message,
+            last_message_id: old.last_message_id,
+            last_message_at: old.last_message_at,
+          }
+        })
+        return groups.value
+      }, { force })
     } catch (e) {
       console.warn('[groups] loadGroups failed:', e.message)
     }
@@ -110,13 +115,13 @@ export const useGroupsStore = defineStore('groups', () => {
 
   async function createGroup(payload) {
     const data = await api.createGroup(payload)
-    await loadGroups()
+    await loadGroups(true)
     return data.group
   }
 
   async function updateGroup(id, payload) {
     const data = await api.updateGroup(id, payload)
-    await loadGroups()
+    await loadGroups(true)
     return data.group
   }
 
@@ -128,7 +133,7 @@ export const useGroupsStore = defineStore('groups', () => {
       messages.value = []
       renderStart.value = 0
     }
-    await loadGroups()
+    await loadGroups(true)
   }
 
   // ── 进入群聊 ──
@@ -444,7 +449,7 @@ export const useGroupsStore = defineStore('groups', () => {
       _sessions.delete(groupId)
       activeGroupId.value = null
       await selectGroup(groupId)
-      await loadGroups()
+      await loadGroups(true)
       return result
     } finally {
       undoing.value = false
@@ -550,12 +555,12 @@ export const useGroupsStore = defineStore('groups', () => {
           if (!queued && _setGroupPreview(data)) _sortGroups()
           g.unread = (g.unread || 0) + 1
         } else {
-          loadGroups()
+          loadGroups(true)
         }
       }
     }))
     _unsubs.push(onEvent('group_message_update', _applyContentUpdate))
-    _unsubs.push(onEvent('group_created', () => loadGroups()))
+    _unsubs.push(onEvent('group_created', () => loadGroups(true)))
     _unsubs.push(onEvent('group_round_undone', (data) => {
       const wasActive = data.group_id === activeGroupId.value
       _sessions.delete(data.group_id)
@@ -563,7 +568,7 @@ export const useGroupsStore = defineStore('groups', () => {
         activeGroupId.value = null
         selectGroup(data.group_id)
       }
-      loadGroups()
+      loadGroups(true)
     }))
     _unsubs.push(onEvent('group_image_start', (data) => {
       if (_getSession(data.group_id)) _applyGenState('generate_start', data)

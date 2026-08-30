@@ -834,7 +834,7 @@ async function onCardWake(id: number) {
     try {
       const res = await api.wakeUpByDoor(id)
       if (res?.success) {
-        await store.fetchOverview(true)
+        await store.fetchOverview(true, true)
       } else {
         toastFn(res.message || '摇醒失败', 'info')
       }
@@ -856,7 +856,7 @@ async function onCardWake(id: number) {
     try {
       const res = await api.wakeUpByDoor(id)
       if (res?.success) {
-        await store.fetchOverview(true)
+        await store.fetchOverview(true, true)
       } else {
         toastFn(res.message || '摇醒失败', 'info')
       }
@@ -870,17 +870,17 @@ async function onCardWake(id: number) {
   try {
     const res = await api.wakeUpByPhone(id)
     if (res?.success) {
-      await store.fetchOverview(true)
+      await store.fetchOverview(true, true)
     } else {
       toastFn(`没叫醒${name}...`, 'info')
       if (res?.door_wake_available) {
         setTimeout(() => { toastFn(`电话打不通，试试上门找${name}吧`, 'info') }, 1200)
       }
-      await store.fetchOverview(true)
+      await store.fetchOverview(true, true)
     }
   } catch (err: any) {
     toastFn('叫醒失败: ' + (err.message || '未知错误'), 'error')
-    await store.fetchOverview(true)
+    await store.fetchOverview(true, true)
   }
 }
 
@@ -895,7 +895,7 @@ async function onWakePhone() {
     } else {
       toastFn('没叫醒...', 'info')
     }
-    await store.fetchOverview(true)
+    await store.fetchOverview(true, true)
   } catch (err: any) {
     toastFn('叫醒失败: ' + (err.message || '未知错误'), 'error')
   }
@@ -918,7 +918,7 @@ async function onWakeDoor() {
     const res = await api.wakeUpByDoor(id)
     if (res.success) {
       drawerOpen.value = false
-      await store.fetchOverview(true)
+      await store.fetchOverview(true, true)
     } else {
       toastFn(res.message || '摇醒失败', 'info')
     }
@@ -941,7 +941,7 @@ async function onClearFromModal() {
   try {
     await api.clearSchedule(detailChar.value.id)
     detailActs.value = []
-    await store.fetchOverview(true)
+    await store.fetchOverview(true, true)
     const idx = store.characters.findIndex(c => c.id === detailChar.value.id)
     if (idx > -1) {
       store.characters[idx].current_activity = '未设置日程'
@@ -1086,7 +1086,7 @@ function dismissResetProgress() {
 function finishReset() {
   store.finishResetTask()
   // 静默刷新，不触发 loading 闪烁
-  store.fetchOverview(true)
+  store.fetchOverview(true, true)
 }
 </script>
 

@@ -487,6 +487,7 @@ function initSchema(db) {
   // Indexes
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages(conversation_id, id);
     CREATE INDEX IF NOT EXISTS idx_messages_raw ON messages(raw_id);
     CREATE INDEX IF NOT EXISTS idx_raw_messages_conv ON raw_messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_fragments_conv ON memory_fragments(conversation_id);

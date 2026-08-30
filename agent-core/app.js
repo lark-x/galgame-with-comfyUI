@@ -47,8 +47,20 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// 静态文件（Vue 前端，构建后）
-app.use(express.static('public'));
+// 生产构建的 /assets 文件名包含内容哈希，可以安全长期缓存。
+// HTML 保持每次校验，确保新的构建入口不会引用已经淘汰的 chunk。
+app.use('/assets', express.static('public/assets', {
+  maxAge: '1y',
+  immutable: true,
+  index: false,
+}));
+app.use(express.static('public', {
+  setHeaders(res, filePath) {
+    if (path.extname(filePath).toLowerCase() === '.html') {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 
 // 图片编辑任务暂存预览（重新生成 / HiresFix 细化确认前）
 app.use('/images/.pending', express.static('data/images/.pending', { dotfiles: 'allow', index: false, maxAge: '5m' }));

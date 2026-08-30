@@ -5,7 +5,10 @@
       <span class="hint">修改即时生效，无需重启</span>
     </div>
 
+    <ThemePicker />
+
     <div class="settings-grid">
+      <NetworkDiagnostics />
       <!-- ComfyUI params: 对话配图 / 朋友圈配图 / 奇遇配图（Tab 切换） -->
       <div class="card comfy-params-card">
         <h3>画师串 & 分辨率</h3>
@@ -89,7 +92,7 @@
 
 
       <!-- 测试画风：自由画面描述（LLM 完善提示词）或固定提示词测试 -->
-      <div class="card">
+      <div class="card image-lab-card">
         <h3>图片实验室</h3>
         <p class="fd">可测试ComfyUI是否正常，使用对应画师串和分辨率发送生图请求，图片仅作预览不保存</p>
         <p class="fd">Anima文生图模型的数据库大约在2025年9月，过新的角色不识别，越久的角色特征越稳定</p>
@@ -256,7 +259,7 @@
       </Teleport>
 
       <!-- LLM API 设置 -->
-      <div class="card">
+      <div class="card llm-settings-card">
         <div class="llm-card-header">
           <h3>LLM API 设置</h3>
           <span v-if="publicLlm.managed" class="managed-badge">SthStart 托管模式</span>
@@ -638,7 +641,7 @@
 
 
       <!-- 功能开关 -->
-      <div class="card">
+      <div class="card feature-settings-card">
         <h3>功能开关</h3>
 
         <div class="toggle-row">
@@ -740,7 +743,7 @@
       </div>
 
       <!-- ComfyUI 连接 -->
-      <div class="card">
+      <div class="card comfy-connection-card">
         <h3>ComfyUI 连接</h3>
         <p class="fd">ComfyUI 服务地址，默认 http://localhost:8188</p>
         <input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
@@ -1061,6 +1064,8 @@ import DropdownSelect from '../components/DropdownSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
+import NetworkDiagnostics from '../components/NetworkDiagnostics.vue'
+import ThemePicker from '../components/ThemePicker.vue'
 import { imageUrl } from '../utils/imageReferences.js'
 
 const settingsStore = useSettingsStore()

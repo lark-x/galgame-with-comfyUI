@@ -30,6 +30,7 @@ import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/t
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { buildChatContext, getSplitHistory } from '../services/contextAssembler.js';
+import { parseMessagePageQuery, readMessagePage } from '../services/messagePagination.js';
 
 const router = Router();
 
@@ -216,20 +217,22 @@ router.delete('/characters/:id/messages/last-round', (req, res, next) => {
   }
 });
 
-// GET /api/characters/:id/messages — 获取角色全部对话消息（本地 SQLite，数据量可控，无需分页）
+// GET /api/characters/:id/messages — 新客户端使用 limit/before 游标分页；
+// 不带分页参数时保留旧版全量响应，避免破坏尚未升级的客户端。
 router.get('/characters/:id/messages', (req, res) => {
   const db = getDb();
   const conversationId = convId(req.params.id);
 
-  const messages = db.prepare(`
-    SELECT id, conversation_id, raw_id, role, content, images, created_at, event_id
-    FROM messages
-    WHERE conversation_id = ?
-    ORDER BY id ASC
-  `).all(conversationId).map(m => ({
-    ...m,
-    created_at: toISODate(m.created_at),
-  }));
+  let page;
+  try {
+    page = readMessagePage(db, conversationId, parseMessagePageQuery(req.query));
+  } catch (error) {
+    return res.status(400).json({
+      error: error.code || 'invalid_message_page',
+      message: error.message,
+    });
+  }
+  const messages = page.messages.map(m => ({ ...m, created_at: toISODate(m.created_at) }));
 
   // 附带最新好感度快照（切角色后恢复用）
   const lastSnapshot = db.prepare(`
@@ -240,6 +243,8 @@ router.get('/characters/:id/messages', (req, res) => {
 
   res.json({
     messages,
+    nextCursor: page.nextCursor,
+    hasMore: page.hasMore,
     affinity: lastSnapshot ? {
       value: lastSnapshot.affinity,
       delta: lastSnapshot.affinity_delta ?? 0,

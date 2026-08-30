@@ -1,8 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as api from '../api/index.js'
+import { createRequestGate } from '../utils/requestGate.js'
+import { applyFxMode, applyTheme, getStoredFxMode, getStoredThemeId, persistFxMode, persistThemeId } from '../themes.js'
 
 export const useSettingsStore = defineStore('settings', () => {
+  const themeId = ref(getStoredThemeId())
+  const fxMode = ref(getStoredFxMode())
   const comfyWidth = ref(1600)
   const comfyHeight = ref(1200)
   const eventWidth = ref(1600)
@@ -12,7 +16,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
   const publicLlm = ref({ managed: false, connected: false, ready: false, text: null, multimodal: null, portalUrl: '' })
   const weatherCity = ref('')
-  let loaded = false
+  const configGate = createRequestGate(5 * 60_000)
 
   // ── localStorage 迁移：旧版存在 localStorage，新版存 DB ──
   const legacyForceImageGen = localStorage.getItem('forceImageGen')
@@ -23,28 +27,29 @@ export const useSettingsStore = defineStore('settings', () => {
     api.updateFeatureFlag('forceImageGen', forceImageGen.value).catch(() => {})
   }
 
-  async function loadComfyConfig() {
-    if (loaded) return
+  async function loadComfyConfig(force = false) {
     try {
-      const data = await api.getConfig()
-      comfyWidth.value = data.comfy?.width || 1600
-      comfyHeight.value = data.comfy?.height || 1200
-      eventWidth.value = data.comfy?.eventWidth || 1600
-      eventHeight.value = data.comfy?.eventHeight || 1200
-      if (data.features?.forceImageGen !== undefined) {
-        forceImageGen.value = data.features.forceImageGen
-      }
-      if (data.features?.realtimeAffinityDisplay !== undefined) {
-        realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
-      }
-      if (data.publicLlm) {
-        publicLlm.value = data.publicLlm
-      }
-      hasApiKey.value = data.publicLlm?.managed
-        ? Boolean(data.publicLlm?.text?.ready)
-        : (data.llm?.hasApiKey ?? false)
-      weatherCity.value = data.weather?.city || ''
-      loaded = true
+      return await configGate.run(async () => {
+        const data = await api.getConfig()
+        comfyWidth.value = data.comfy?.width || 1600
+        comfyHeight.value = data.comfy?.height || 1200
+        eventWidth.value = data.comfy?.eventWidth || 1600
+        eventHeight.value = data.comfy?.eventHeight || 1200
+        if (data.features?.forceImageGen !== undefined) {
+          forceImageGen.value = data.features.forceImageGen
+        }
+        if (data.features?.realtimeAffinityDisplay !== undefined) {
+          realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
+        }
+        if (data.publicLlm) {
+          publicLlm.value = data.publicLlm
+        }
+        hasApiKey.value = data.publicLlm?.managed
+          ? Boolean(data.publicLlm?.text?.ready)
+          : (data.llm?.hasApiKey ?? false)
+        weatherCity.value = data.weather?.city || ''
+        return data
+      }, { force })
     } catch {
       // keep defaults
     }
@@ -78,10 +83,22 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function setHasApiKey(v) { hasApiKey.value = v }
 
+  function setTheme(nextThemeId) {
+    const next = applyTheme(nextThemeId)
+    themeId.value = persistThemeId(next)
+    return themeId.value
+  }
+
+  function setFxMode(nextFxMode) {
+    const next = applyFxMode(nextFxMode)
+    fxMode.value = persistFxMode(next)
+    return fxMode.value
+  }
+
   async function setWeatherCity(city) {
     weatherCity.value = city
     await api.updateWeatherCity(city)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, publicLlm, weatherCity, loadComfyConfig, setComfySize, setEventSize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity }
+  return { themeId, fxMode, comfyWidth, comfyHeight, eventWidth, eventHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, publicLlm, weatherCity, loadComfyConfig, setTheme, setFxMode, setComfySize, setEventSize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity }
 })

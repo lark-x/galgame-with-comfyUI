@@ -6,8 +6,11 @@ export async function listCharacters() {
   return res.json()
 }
 
-export async function getMessages(characterId) {
-  const res = await fetch(`${BASE}/characters/${characterId}/messages`)
+export async function getMessages(characterId, { limit = 50, before = null } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (before !== null && before !== undefined) params.set('before', String(before))
+  const res = await fetch(`${BASE}/characters/${characterId}/messages?${params}`)
+  if (!res.ok) throw new Error(`Messages request failed (${res.status})`)
   return res.json()
 }
 

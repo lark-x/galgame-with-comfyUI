@@ -10,8 +10,10 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
+import { createRequestGate } from '../utils/requestGate.js'
 
 export const useScheduleStore = defineStore('schedule', () => {
+  const overviewGate = createRequestGate(60_000)
   // ── 状态 ──
   const characters = ref([])           // 所有角色概览
   const currentSchedule = ref(null)    // 当前展开角色的详细日程
@@ -70,7 +72,7 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   // 叫醒状态变更 → 刷新概览
   onEvent('schedule_state_change', () => {
-    fetchOverview(true)
+    fetchOverview(true, true)
   })
 
   onEvent('schedule_reset_progress', (data) => {
@@ -94,7 +96,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       resetTask.value.processing = false
       resetTask.value.backgrounded = false
       // 静默刷新概览（不触发 loading，避免 card-grid 闪烁）
-      fetchOverview(true)
+      fetchOverview(true, true)
     } else if (data.phase === 'error') {
       resetTask.value.phase = 'cancelled'
       resetTask.value.processing = false
@@ -104,11 +106,14 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   // ── 方法 ──
 
-  async function fetchOverview(silent = false) {
+  async function fetchOverview(silent = false, force = false) {
     if (!silent) loading.value = true
     try {
-      const data = await api.getScheduleOverview()
-      characters.value = data.characters || []
+      return await overviewGate.run(async () => {
+        const data = await api.getScheduleOverview()
+        characters.value = data.characters || []
+        return characters.value
+      }, { force })
     } catch (err) {
       console.error('[schedule] fetchOverview failed:', err.message)
     } finally {
@@ -153,7 +158,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       const result = await api.regenerateSchedule(characterId, direction)
       // 静默刷新概览（不显示 loading，避免 card-grid 闪烁）
       await Promise.all([
-        fetchOverview(true),
+        fetchOverview(true, true),
         characterId === currentSchedule.value?.character_id
           ? fetchCharacterSchedule(characterId)
           : Promise.resolve(),

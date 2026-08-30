@@ -201,14 +201,17 @@ function activitySummary(c: any) {
 }
 .list-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px 18px; cursor: pointer;
+  padding: 10px 14px; cursor: pointer;
   transition: background 0.12s;
-  border-left: 3px solid transparent;
+  border-radius: 10px;
+  border: none;
+  margin: 2px 8px;
 }
 .list-item:hover { background: var(--bg-hover); }
 .list-item.active {
-  background: rgba(224,123,108,0.06);
-  border-left-color: var(--accent);
+  background: var(--soft-accent);
+  color: var(--text-bright);
+  border: none;
 }
 
 .li-avatar {
@@ -270,7 +273,7 @@ function activitySummary(c: any) {
     padding: 8px 10px; text-align: center; border-left: none;
     border-bottom: 3px solid transparent; min-width: 56px;
   }
-  .list-item.active { border-left: none; border-bottom-color: var(--accent); }
+  .list-item.active { border: none; }
   .li-summary { display: none; }
   .panel-chips { display: none; }
 }

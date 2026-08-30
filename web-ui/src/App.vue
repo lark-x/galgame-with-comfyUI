@@ -5,7 +5,7 @@
     <span class="banner-text">{{ settings.publicLlm?.managed ? (settings.publicLlm?.text?.ready ? '公共 LLM 文本模型已就绪，但多模态模板尚未就绪；如需图文对话，请在 SthStart 控制台补充绑定' : '公共 LLM 尚未就绪或未分配文本模板，请前往设置或 SthStart 控制台检查模型绑定') : '尚未配置 API Key，请前往设置页面填写 DeepSeek（或其他兼容）API Key' }}</span>
     <router-link to="/settings" class="banner-link">前往设置 →</router-link>
   </div>
-  <div class="app-layout" :class="{ 'is-mobile': isMobile }">
+  <div class="app-layout" :class="[`theme-layout--${settings.themeId}`, { 'is-mobile': isMobile }]">
     <!-- 移动端遮罩层：Sidebar 拉出时覆盖聊天区域 -->
     <Transition name="scrim-fade">
       <div v-if="isMobile && mobileSidebarOpen" class="mobile-scrim" @click="closeMobileSidebar"></div>
@@ -182,9 +182,6 @@ onMounted(async () => {
 
   if (isMobile.value) {
     // 移动端：角色列表默认藏在屏幕左侧，用户点击按钮才拉出
-  } else if (chat.characters.length > 0 && !chat.activeCharId && !route.params.id) {
-    // 仅在无路由角色参数时自动选第一个（有路由时 ChatView 会根据路由自行 selectChar）
-    chat.selectChar(chat.characters[0].id)
   }
 
   // ── 手机端访问 Toast：启动器通过 ?mobile_ip= 传入本机 IP，底部浮窗 2s ──
@@ -240,16 +237,52 @@ onUnmounted(() => {
   --glass-border: rgba(255, 255, 255, 0.28);
   --glass-shadow: 0 2px 16px rgba(0, 0, 0, 0.03);
   --glass-blur: blur(18px);
+
+  /* Theme extension tokens. Existing components can migrate gradually. */
+  --input-bg: rgba(255, 255, 255, 0.9);
+  --input-border: #d5d0ca;
+  --button-text: #ffffff;
+  --accent-rgb: 224, 123, 108;
+  --accent-shadow: rgba(224, 123, 108, 0.25);
+  --shell-bg: rgba(255, 255, 255, 0.45);
+  --shell-hover: rgba(255, 255, 255, 0.28);
+  --shell-active: rgba(224, 123, 108, 0.1);
+  --shell-border: rgba(255, 255, 255, 0.25);
+  --page-decoration: none;
+  --page-pattern: none;
+  --page-decoration-opacity: 0;
+  --scrim-bg: rgba(0, 0, 0, 0.45);
+  --message-user-bg: #a25740;
+  --message-user-text: #e8e8e8;
+  --message-assistant-bg: var(--bg-secondary);
 }
 
 html, body, #app {
   height: 100%;
   min-height: 100vh; min-height: 100dvh;
-  font-family: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   color: var(--text-primary);
   overflow: hidden;
 }
 html, body { background: var(--bg-primary); }
+body { position: relative; }
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+body::before {
+  background: var(--page-decoration);
+  opacity: var(--page-decoration-opacity);
+}
+body::after {
+  background-image: var(--page-pattern);
+  background-size: 31px 31px, 120px 120px;
+  opacity: calc(var(--page-decoration-opacity) * 0.45);
+}
 #app { background: transparent; display: flex; flex-direction: column; }
 
 .app-layout { display: flex; flex: 1; min-height: 0; position: relative; z-index: 1; }
@@ -277,36 +310,36 @@ button {
 }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
+.btn-primary { background: var(--accent); color: var(--button-text); }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 2px 12px var(--accent-shadow); }
 .btn-ghost {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--shell-hover);
   backdrop-filter: blur(12px);
   color: var(--text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--shell-border);
 }
 .btn-ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-bright); }
 
 input, textarea, select {
-  background: rgba(255, 255, 255, 0.9); border: 1px solid #d5d0ca;
+  background: var(--input-bg); border: 1px solid var(--input-border);
   border-radius: 8px; color: var(--text-bright); padding: 8px 12px;
   font-size: 13px; outline: none; transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 input:focus, textarea:focus, select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 textarea { resize: vertical; font-family: inherit; }
 
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #b0b0b0; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 /* ── 移动端 Sidebar 遮罩 ── */
 .mobile-scrim {
   position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--scrim-bg);
   z-index: 99;
 }
 .scrim-fade-enter-active { transition: opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -397,4 +430,12 @@ textarea { resize: vertical; font-family: inherit; }
 .modal-fade-leave-active { transition: opacity 0.2s ease; }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
 
+/* iOS Safari zooms the page when a text control is smaller than 16px. */
+@media (max-width: 767px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
 </style>

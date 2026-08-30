@@ -48,7 +48,9 @@
       -->
       <div ref="msgList" class="message-list" @scroll="onScroll">
         <!-- 加载指示器置于列表顶部 → 用户上滚到顶部时自动展开更早消息 -->
-        <div v-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
+        <div v-if="chat.loadingOlder" class="load-older load-older-hint">正在加载更早消息…</div>
+        <div v-else-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
+        <div v-if="chat.messageLoadError && chat.messages.length === 0" class="load-older load-error">{{ chat.messageLoadError }}</div>
 
         <div ref="msgListInner" class="msg-list-inner">
           <template v-for="item in flatItems" :key="item.id">
@@ -779,7 +781,7 @@ const previewImage = ref(null)
 
 function onChatImageDeleted(deletedUrl) {
   const base = deletedUrl.replace(/\?.*$/, '')
-  chat.messages = chat.messages.filter(msg => {
+  chat.replaceActiveMessages(chat.messages.filter(msg => {
     if (msg.type === 'image_gen' && msg.images) {
       return !msg.images.some(img => {
         const imgUrl = typeof img === 'string' ? img : img.url
@@ -787,7 +789,7 @@ function onChatImageDeleted(deletedUrl) {
       })
     }
     return true
-  })
+  }))
   previewImage.value = null
 }
 
@@ -1318,7 +1320,7 @@ function timeLabel(iso) {
 let userScrolledUp = false
 let scrollTimer = null
 
-function onScroll() {
+async function onScroll() {
   const el = msgList.value
   if (!el) return
   const distToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
@@ -1335,10 +1337,12 @@ function onScroll() {
   // 滚动到顶部 → 展开渲染窗口显示更早消息
   if (el.scrollTop < 40 && chat.hasMoreOlder) {
     const prevHeight = el.scrollHeight
-    chat.expandWindow()
-    nextTick(() => {
-      if (msgList.value) msgList.value.scrollTop += msgList.value.scrollHeight - prevHeight
-    })
+    const changed = await chat.expandWindow()
+    if (changed) {
+      nextTick(() => {
+        if (msgList.value) msgList.value.scrollTop += msgList.value.scrollHeight - prevHeight
+      })
+    }
   }
 }
 
@@ -1471,7 +1475,12 @@ watch(() => chat.activeCharId, (id, oldId) => {
     if (id !== routeId) router.replace('/chat/' + id)
     pendingCharSwitch = true
     userScrolledUp = false
-    if (msgList.value) msgList.value.style.visibility = 'hidden'
+    nextTick(() => {
+      const el = msgList.value
+      if (!el || chat.messages.length === 0) return
+      el.scrollTop = el.scrollHeight
+      pendingCharSwitch = false
+    })
     // 静默刷新日程，确保 header 显示最新状态
     scheduleStore.fetchOverview(true)
   }
@@ -1653,6 +1662,7 @@ function renderContent(text) {
 
 .load-older { text-align:center; padding:8px 0; font-size:12px; color:var(--text-secondary); user-select:none; }
 .load-older-hint { opacity:0.6; }
+.load-error { color: var(--danger); }
 
 .time-divider { text-align:center; padding:16px 0 8px; font-size:12px; color:var(--text-secondary); user-select:none; }
 

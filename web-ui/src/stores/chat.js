@@ -2,11 +2,14 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 import { imageIdentity, normalizeImage } from '../utils/imageReferences.js'
+import { createRequestGate } from '../utils/requestGate.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
 
 export const useChatStore = defineStore('chat', () => {
+  const characterGate = createRequestGate(30_000)
+  const messageSessions = new Map()
   let streamSeq = 0
   let activeStream = null  // { charId, id, abort } | null
 
@@ -22,6 +25,10 @@ export const useChatStore = defineStore('chat', () => {
   const characters = ref([])
   const activeCharId = ref(null)
   const messages = ref([])       // unified: { id, role, type, content, images, genId, genStatus, genStartTime, created_at }
+  const loadingMessages = ref(false)
+  const loadingOlder = ref(false)
+  const messageLoadError = ref('')
+  const hasMoreRemote = ref(false)
   const streaming = ref(false)
   const streamingContent = ref('')
   const showTypingDots = ref(false)   // 打字动画：仅在发送后、首个 token 到达前显示一次
@@ -31,33 +38,117 @@ export const useChatStore = defineStore('chat', () => {
   const sidebarScrollSignal = ref(0)  // 主动消息到达时递增，驱动 Sidebar 滚动到顶部
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
-  // 客户端渲染窗口：messages 已全量加载，renderStart 控制从哪条开始显示
+  // 每页最多 50 条；renderStart 仅兼容已经存在于内存中的折叠窗口。
   const INITIAL_COUNT = 50
   const EXPAND_COUNT = 30
   const renderStart = ref(0)
   const visibleMessages = computed(() => messages.value.slice(renderStart.value))
-  const hasMoreOlder = computed(() => renderStart.value > 0)
+  const hasMoreOlder = computed(() => renderStart.value > 0 || hasMoreRemote.value)
 
-  async function loadCharacters() {
-    try { const d = await api.listCharacters(); characters.value = d.characters || [] } catch {}
+  function getMessageSession(charId) {
+    const key = String(charId)
+    let session = messageSessions.get(key)
+    if (!session) {
+      session = {
+        messages: [], loaded: false, hasMore: false, nextCursor: null,
+        affinity: null, renderStart: 0, initialLoadPromise: null, version: 0,
+      }
+      messageSessions.set(key, session)
+    }
+    return session
   }
 
-  async function loadMessages(charId) {
+  function bindMessageSession(session) {
+    messages.value = session.messages
+    renderStart.value = session.renderStart || 0
+    hasMoreRemote.value = session.hasMore
+    realtimeAffinity.value = session.affinity
+    loadingMessages.value = false
+    messageLoadError.value = ''
+  }
+
+  function replaceActiveMessages(next) {
+    messages.value = next
+    const session = activeCharId.value == null ? null : getMessageSession(activeCharId.value)
+    if (session) session.messages = next
+  }
+
+  function invalidateBackgroundSession(charId) {
+    const session = messageSessions.get(String(charId))
+    if (session) {
+      session.version++
+      session.loaded = false
+    }
+  }
+
+  function isActiveCharacter(charId) {
+    return activeCharId.value != null && String(activeCharId.value) === String(charId)
+  }
+
+  async function loadCharacters(force = false) {
     try {
-      const d = await api.getMessages(charId);
-      const raw = d.messages || [];
-      const result = rawToMessages(raw);
-      messages.value = result;
-      renderStart.value = Math.max(0, result.length - INITIAL_COUNT);
-      // 恢复好感度快照（切角色后 reatimeAffinity 被清空，从 DB 恢复）
-      if (d.affinity && !realtimeAffinity.value) {
-        realtimeAffinity.value = {
-          affinity: d.affinity.value,
-          affinityDelta: d.affinity.delta ?? 0,
-          lastReason: d.affinity.reason || '',
-        }
-      }
+      return await characterGate.run(async () => {
+        const d = await api.listCharacters()
+        characters.value = d.characters || []
+        return characters.value
+      }, { force })
     } catch {}
+  }
+
+  async function loadMessages(charId, { older = false, force = false, retryInvalidated = true } = {}) {
+    const session = getMessageSession(charId)
+    if (!older && session.loaded && !force) return true
+    if (!older && session.initialLoadPromise && !force) return session.initialLoadPromise
+    if (older && (!session.hasMore || loadingOlder.value)) return false
+    const requestVersion = session.version
+    const request = (async () => {
+      if (older) loadingOlder.value = true
+      else if (activeCharId.value === charId) loadingMessages.value = true
+      messageLoadError.value = ''
+      try {
+        const d = await api.getMessages(charId, {
+          limit: INITIAL_COUNT,
+          before: older ? session.nextCursor : null,
+        });
+        const raw = d.messages || [];
+        const result = rawToMessages(raw);
+        if (older) {
+          if (activeCharId.value === charId) messages.value.unshift(...result)
+          else session.messages.unshift(...result)
+        } else {
+          session.messages.splice(0, session.messages.length, ...result)
+          session.loaded = session.version === requestVersion
+          session.renderStart = 0
+        }
+        session.hasMore = Boolean(d.hasMore)
+        session.nextCursor = d.nextCursor ?? null
+        if (d.affinity && !session.affinity) {
+          session.affinity = {
+            affinity: d.affinity.value,
+            affinityDelta: d.affinity.delta ?? 0,
+            lastReason: d.affinity.reason || '',
+          }
+        }
+        if (activeCharId.value === charId) bindMessageSession(session)
+        return true
+      } catch (error) {
+        if (activeCharId.value === charId) messageLoadError.value = error.message || '消息加载失败'
+        return false
+      } finally {
+        if (older) loadingOlder.value = false
+        else if (activeCharId.value === charId) loadingMessages.value = false
+        if (!older && session.initialLoadPromise === request) session.initialLoadPromise = null
+      }
+    })()
+    if (older) return request
+    session.initialLoadPromise = request
+    const ok = await request
+    // SSE 可能恰好在初始分页查询过程中保存了后台消息。再读一次可避免
+    // 旧查询完成后把刚失效的 session 错误标记为新鲜；持续高频事件时最多重试一次。
+    if (ok && session.version !== requestVersion && retryInvalidated) {
+      return loadMessages(charId, { force: true, retryInvalidated: false })
+    }
+    return ok
   }
 
   // 将服务端原始消息转为前端统一格式
@@ -105,9 +196,15 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // 向上展开渲染窗口（无需网络请求，数据已全量在内存中）
-  function expandWindow() {
-    if (!hasMoreOlder.value) return
-    renderStart.value = Math.max(0, renderStart.value - EXPAND_COUNT)
+  async function expandWindow() {
+    if (renderStart.value > 0) {
+      renderStart.value = Math.max(0, renderStart.value - EXPAND_COUNT)
+      const session = activeCharId.value == null ? null : getMessageSession(activeCharId.value)
+      if (session) session.renderStart = renderStart.value
+      return true
+    }
+    if (activeCharId.value == null || !hasMoreRemote.value) return false
+    return loadMessages(activeCharId.value, { older: true })
   }
 
   // 后台图片编辑任务确认覆盖后，刷新消息里的图片 URL（避免浏览器缓存旧图）
@@ -132,25 +229,23 @@ export const useChatStore = defineStore('chat', () => {
       showTypingDots.value = false
     }
     activeCharId.value = charId
-    messages.value = []
-    renderStart.value = 0
+    const session = getMessageSession(charId)
+    bindMessageSession(session)
     guesses.value = null  // 切角色时清除候选词
-    realtimeAffinity.value = null  // 切角色时清除实时好感度
     // 标记主动消息已读（DB 持久化），Sidebar 的 onCharClick 也会调，这里兜底
     try {
       const { useProactiveStore } = await import('../stores/notifications.js')
       useProactiveStore().markRead(charId)
     } catch { /* 非关键 */ }
     affinityKey.value = 0         // 重置动画 key，避免切角色触发 roll
-    await loadMessages(charId)
-    await loadCharacters()
+    if (!session.loaded) await loadMessages(charId)
   }
 
   async function updateActiveCharacter(data) {
     const id = activeCharId.value
     if (!id) return
     await api.updateCharacter(id, data)
-    await loadCharacters()
+    await loadCharacters(true)
   }
 
   async function clearActiveMessages() {
@@ -161,7 +256,12 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent.value = ''
     showTypingDots.value = false
     await api.clearMessages(id)
-    messages.value = []
+    const session = getMessageSession(id)
+    session.messages = []
+    session.loaded = true
+    session.hasMore = false
+    session.nextCursor = null
+    bindMessageSession(session)
     renderStart.value = 0
   }
 
@@ -202,15 +302,15 @@ export const useChatStore = defineStore('chat', () => {
     if (lastUserIdx === -1) {
       // 纯主动聊天：只移除末尾相同 raw_id 的消息
       if (tailRawId != null) {
-        messages.value = msgs.filter(m => m.raw_id !== tailRawId)
+        replaceActiveMessages(msgs.filter(m => m.raw_id !== tailRawId))
       }
     } else {
       // 正常路径：移除 raw_id >= lastUserRawId 的所有消息
-      messages.value = msgs.filter(m => {
+      replaceActiveMessages(msgs.filter(m => {
         if (m.raw_id != null) return m.raw_id < lastUserRawId
         const idx = msgs.indexOf(m)
         return idx < lastUserIdx
-      })
+      }))
     }
 
     // 调整渲染窗口
@@ -222,7 +322,7 @@ export const useChatStore = defineStore('chat', () => {
   // 在设置页面调用：AI 生成角色并直接入库
   async function generateCharacter(description) {
     const result = await api.generateCharacter(description)
-    await loadCharacters()
+    await loadCharacters(true)
     return result
   }
 
@@ -230,7 +330,7 @@ export const useChatStore = defineStore('chat', () => {
     const id = activeCharId.value
     if (!id) return
     const r = await api.uploadAvatar(id, base64 || '')
-    await loadCharacters()
+    await loadCharacters(true)
     return r
   }
 
@@ -249,10 +349,11 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent.value = ''
     showTypingDots.value = false
     await api.deleteCharacter(id)
+    messageSessions.delete(String(id))
     messages.value = []
     renderStart.value = 0
     activeCharId.value = null
-    await loadCharacters()
+    await loadCharacters(true)
   }
 
   function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
@@ -432,7 +533,7 @@ export const useChatStore = defineStore('chat', () => {
                 }
               }
               for (let i = bubbleIds.length - 1; i >= parts.length; i--) {
-                messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
+                replaceActiveMessages(messages.value.filter(x => x.id !== bubbleIds[i]))
               }
               bubbleIds.length = parts.length
             }
@@ -474,7 +575,7 @@ export const useChatStore = defineStore('chat', () => {
             if (lastEvent === 'queued') {
               // 清理临时气泡（后端已保存用户消息）
               for (const bid of bubbleIds) {
-                messages.value = messages.value.filter(x => x.id !== bid)
+                replaceActiveMessages(messages.value.filter(x => x.id !== bid))
               }
               streaming.value = false
               showTypingDots.value = false
@@ -498,6 +599,7 @@ export const useChatStore = defineStore('chat', () => {
                 affinityDelta: d.affinityDelta ?? 0,
                 lastReason: d.lastReason || '',
               }
+              getMessageSession(charId).affinity = realtimeAffinity.value
               affinityKey.value++
             }
             // ── msg_saved: 临时 ID → 真实 ID ──
@@ -518,7 +620,7 @@ export const useChatStore = defineStore('chat', () => {
         // 无意义空流（连接后立即关闭，无数据）→ 可重试
         if (streamAttempt < MAX_STREAM_RETRIES) {
           for (const bid of bubbleIds) {
-            messages.value = messages.value.filter(x => x.id !== bid)
+            replaceActiveMessages(messages.value.filter(x => x.id !== bid))
           }
           const delay = streamAttempt === 0 ? 1000 : 500
           await new Promise(r => setTimeout(r, delay))
@@ -548,7 +650,7 @@ export const useChatStore = defineStore('chat', () => {
           // ── 静默重试：没有任何有价值内容，连接可能在握手/早期阶段断开 ──
           //    清理当前尝试的气泡（包括占位和未具现化），准备下次重试
           for (const bid of bubbleIds) {
-            messages.value = messages.value.filter(x => x.id !== bid)
+            replaceActiveMessages(messages.value.filter(x => x.id !== bid))
           }
           // 短暂等待让服务端重启完成（递减退避：1s → 0.5s）
           const delay = streamAttempt === 0 ? 1000 : 500
@@ -585,7 +687,7 @@ export const useChatStore = defineStore('chat', () => {
               if (i > 0 || bubbleIds.length === 1) bubbleIds.splice(i, 1)
             } else if (!m.content?.trim()) {
               if (i > 0 || bubbleIds.length === 1) {
-                messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
+                replaceActiveMessages(messages.value.filter(x => x.id !== bubbleIds[i]))
                 bubbleIds.splice(i, 1)
               }
             } else {
@@ -599,7 +701,7 @@ export const useChatStore = defineStore('chat', () => {
               bubbleIds.splice(i, 1)
               i--
             } else if (!m.content?.trim()) {
-              messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
+              replaceActiveMessages(messages.value.filter(x => x.id !== bubbleIds[i]))
               bubbleIds.splice(i, 1)
               i--
             } else {
@@ -619,7 +721,12 @@ export const useChatStore = defineStore('chat', () => {
     if (isCurrentStream(sessionId)) {
       streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
       activeStream = null
-      await loadCharacters()
+      const char = characters.value.find(item => item.id === charId)
+      if (char) {
+        char.last_message = fullResponse || content
+        char.last_message_at = new Date().toISOString()
+        characters.value.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0))
+      }
     }
   }
 
@@ -648,7 +755,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     // 如果是当前活跃角色，直接追加消息到聊天界面
-    if (activeCharId.value === charId && data.msg_id) {
+    if (isActiveCharacter(charId) && data.msg_id) {
       // 文字问候气泡：按 segments 分句，每个分句一个气泡
       const segments = data.segments?.length ? data.segments : [data.content];
       const msgIds = data.msg_ids?.length ? data.msg_ids : [data.msg_id];
@@ -701,6 +808,10 @@ export const useChatStore = defineStore('chat', () => {
           created_at: data.created_at,
         })
       }
+    } else {
+      // 已访问过的后台角色可能仍持有旧的内存快照。失效后下次切换会重新分页读取，
+      // 避免主动消息只更新侧边栏却不出现在聊天正文。
+      invalidateBackgroundSession(charId)
     }
   }
 
@@ -723,7 +834,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     // 如果是当前活跃角色，直接追加到消息列表
-    if (activeCharId.value === charId && data.messages?.length) {
+    if (isActiveCharacter(charId) && data.messages?.length) {
       for (const msg of data.messages) {
         messages.value.push({
           id: msg.id || uid(),
@@ -734,9 +845,11 @@ export const useChatStore = defineStore('chat', () => {
           is_delayed_reply: true,
         })
       }
+    } else {
+      invalidateBackgroundSession(charId)
     }
   }
 
-  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
-    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls }
+  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, loadingMessages, loadingOlder, messageLoadError, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
+    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls, replaceActiveMessages }
 })
