@@ -17,13 +17,86 @@ import { IMAGE_PROMPT_RULE, getWorldIntegrationRule } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { parseLoras } from '../maibot-bridge/generate.js';
 import { extractImagePromptResponse } from '../services/imagePromptResponse.js';
+import { Readable } from 'stream';
 import fs from 'fs';
 import path from 'path';
+import {
+  isArtifactImage,
+  artifactImageUrl,
+  toArtifactImageReference,
+  persistGeneratedImage,
+  imageDisplayUrl,
+  toClientImage,
+  imageIdentity,
+  parseImageValues,
+  downloadPublicArtifact,
+} from '../integrations/sthstart/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IMAGES_DIR = resolve(__dirname, '../../data/images');
 
 const router = Router();
+
+async function proxyPublicArtifact(req, res) {
+  const artifactId = String(req.params.id || '').trim();
+  if (!config.publicServices.image) {
+    return res.status(404).json({ error: 'public_images_disabled', message: 'SthStart 公共图片托管未启用' });
+  }
+  if (!config.publicServices.appToken) {
+    return res.status(401).json({ error: 'missing_sthstart_app_token', message: '缺少 SthStart 应用授权令牌' });
+  }
+  if (!artifactId || !isArtifactImage({ artifactId })) {
+    return res.status(400).json({ error: 'invalid_artifact_id', message: '产物标识不合法' });
+  }
+
+  const forwardHeaders = {};
+  for (const header of ['if-none-match', 'if-modified-since', 'range']) {
+    const value = req.headers[header];
+    if (value) forwardHeaders[header] = value;
+  }
+
+  let response;
+  try {
+    response = await fetch(`${config.publicServices.baseURL}/api/v1/artifacts/${encodeURIComponent(artifactId)}`, {
+      method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+      headers: {
+        Authorization: `Bearer ${config.publicServices.appToken}`,
+        ...forwardHeaders,
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    return res.status(502).json({
+      error: 'sthstart_artifact_unreachable',
+      message: error?.message || '无法连接 SthStart 产物服务',
+    });
+  }
+
+  if (!response.ok && response.status !== 304 && response.status !== 206) {
+    const detail = await response.text().catch(() => '');
+    return res.status(response.status).json({
+      error: 'sthstart_artifact_error',
+      status: response.status,
+      ...(detail ? { message: detail.slice(0, 240) } : {}),
+    });
+  }
+
+  for (const header of ['content-type', 'content-length', 'etag', 'last-modified', 'cache-control', 'accept-ranges', 'content-range']) {
+    const value = response.headers.get(header);
+    if (value) res.setHeader(header, value);
+  }
+  res.status(response.status);
+  if (req.method === 'HEAD' || !response.body) return res.end();
+
+  Readable.fromWeb(response.body).on('error', (error) => {
+    console.warn(`[sthstart-public-image] artifact stream failed: ${error.message}`);
+    if (!res.headersSent) res.status(502);
+    res.end();
+  }).pipe(res);
+}
+
+router.get('/artifacts/:id', proxyPublicArtifact);
+router.head('/artifacts/:id', proxyPublicArtifact);
 
 const FOLDER_LABEL = {
   [LEGACY_CATEGORY]: '历史',
@@ -179,10 +252,13 @@ router.post('/generate', async (req, res) => {
   generateImage(prompt, { promptScene: 'standalone', ragQuery: rag_query, ragTimeoutMs: RAG_TIMEOUT_FAST_MS })
     .then(result => {
       if (result.success) {
+        const outputPaths = (result.images || [])
+          .map((img, index) => persistGeneratedImage(img, 'chat', `${Date.now()}_${index}_${img.filename || 'comfy.png'}`))
+          .filter(Boolean);
         db.prepare(`
           UPDATE image_tasks SET status = 'done', prompt_refined = ?, output_paths = ?, workflow_template = ?, finished_at = datetime('now')
           WHERE id = ?
-        `).run(result.promptRefined || prompt, JSON.stringify(result.images.map(i => i.filename)), result.wfMode, taskId);
+        `).run(result.promptRefined || prompt, JSON.stringify(outputPaths), result.wfMode, taskId);
       } else {
         db.prepare(`
           UPDATE image_tasks SET status = 'failed', error_message = ?, workflow_template = ?, finished_at = datetime('now')
@@ -397,7 +473,18 @@ async function pickLatestTestImage() {
   if (task) {
     let urls = [];
     try { urls = JSON.parse(task.output_paths || '[]'); } catch {}
-    const url = urls.find(u => parseImageTarget(String(u).replace(/\?.*$/, '')));
+    const artifact = urls.find(isArtifactImage);
+    if (artifact) {
+      saved = {
+        type: 'artifact',
+        artifactId: artifact.artifactId,
+        url: imageDisplayUrl(artifact),
+        at: Date.parse(task.finished_at || task.created_at || '') || 0,
+        promptFallback: task.prompt_refined || task.prompt_original || '',
+        workflowTemplateFallback: task.workflow_template || null,
+      };
+    }
+    const url = urls.find(u => !isArtifactImage(u) && parseImageTarget(String(u).replace(/\?.*$/, '')));
     if (url) {
       const cleanUrl = String(url).replace(/\?.*$/, '');
       const target = parseImageTarget(cleanUrl);
@@ -445,17 +532,31 @@ router.post('/test-hires', async (req, res) => {
 
     if (source.type === 'test') {
       const img = source.images?.[0];
-      if (!img?.base64) {
+      if (!img?.base64 && !isArtifactImage(img)) {
         return res.status(404).json({ success: false, error: '最近一次测试画风结果不可用，请先发送测试' });
       }
-      original = img.base64;
-      buffer = Buffer.from(img.base64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+      if (isArtifactImage(img)) {
+        original = imageDisplayUrl(img);
+        buffer = await downloadPublicArtifact(img.artifactId);
+      } else {
+        original = img.base64;
+        buffer = Buffer.from(img.base64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+      }
       refineOpts.promptText = source.prompt;
       refineOpts.artist = source.artist;
       refineOpts.loras = [];
       refineOpts.sourceMode = source.wfMode;
       refineOpts.scene = source.mode;
       refineOpts.ext = path.extname(img.filename || '') || '.png';
+    } else if (source.type === 'artifact') {
+      original = source.url;
+      buffer = await downloadPublicArtifact(source.artifactId);
+      refineOpts.promptText = source.promptFallback;
+      refineOpts.artist = config.comfyui.artist;
+      refineOpts.loras = [];
+      refineOpts.sourceMode = source.workflowTemplateFallback;
+      refineOpts.scene = 'chat';
+      refineOpts.ext = path.extname(source.filename || '') || '.png';
     } else {
       const cleanUrl = source.url.replace(/\?.*$/, '');
       const target = parseImageTarget(cleanUrl);
@@ -782,6 +883,10 @@ router.delete('/delete', async (req, res) => {
   const { url: imageUrl } = req.body;
   if (!imageUrl) return res.status(400).json({ error: 'url is required' });
 
+  if (typeof imageUrl === 'object' || String(imageUrl).includes('/api/images/artifacts/')) {
+    return res.status(409).json({ error: 'central_artifact_managed', message: '公共图片由 SthStart 管理，请在公共服务页面处理。' });
+  }
+
   const cleanUrl = imageUrl.replace(/\?.*$/, '');
   const match = cleanUrl.match(/^\/images\/([^/]+)\/([^/]+)$/);
 
@@ -825,9 +930,9 @@ router.delete('/delete', async (req, res) => {
 
         for (const row of msgRows) {
           try {
-            const urls = JSON.parse(row.images) || [];
+            const urls = parseImageValues(row.images);
             const filtered = urls.filter(u => {
-              const uBase = u.replace(/\?.*$/, '');
+              const uBase = imageDisplayUrl(u).replace(/\?.*$/, '');
               return uBase !== cleanUrl;
             });
             if (filtered.length > 0) {

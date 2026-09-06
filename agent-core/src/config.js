@@ -8,6 +8,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const envPath = resolve(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
 
+export { getPublicLlmStatus } from './integrations/sthstart/index.js';
+
 // 每日免费鸡蛋：opencode zen 免费端点（无需 API Key，按 IP 限流）
 const FREE_EGG_BASE_URL = 'https://opencode.ai/zen/v1';
 // 免费模型轮换顺序：deepseek → MiMo → Hy3；本轮失败过的模型只记内存，下次开启重新开始
@@ -19,6 +21,17 @@ export const config = {
   isDev: process.env.NODE_ENV !== 'production',
   port: parseInt(process.env.PORT, 10) || 3099,
   dbPath: process.env.DB_PATH || './data/agent.db',
+  publicServices: {
+    baseURL: (process.env.STHSTART_SERVICE_URL || 'http://127.0.0.1:4100').replace(/\/+$/, ''),
+    portalUrl: (process.env.STHSTART_PORTAL_URL || 'http://127.0.0.1:4173').replace(/\/+$/, ''),
+    appToken: process.env.STHSTART_APP_TOKEN || '',
+    llm: process.env.STHSTART_PUBLIC_LLM === 'true',
+    vector: process.env.STHSTART_PUBLIC_VECTOR === 'true',
+    image: process.env.STHSTART_PUBLIC_IMAGE === 'true',
+    vectorProfile: process.env.STHSTART_VECTOR_PROFILE || '',
+    imageProfile: process.env.STHSTART_IMAGE_PROFILE || '',
+    generationPurpose: process.env.STHSTART_GENERATION_PURPOSE || 'linshe-chat-image',
+  },
   llm: {
     provider: process.env.LLM_PROVIDER || 'deepseek',
     // 每日免费鸡蛋开关（仅内存，不做持久化：重启后默认关闭）。
@@ -368,10 +381,26 @@ export function getLlmApiKey() {
 }
 
 export function getLlmConfig() {
+  const isManaged = config.publicServices.llm === true;
+  if (isManaged) {
+    return {
+      managed: true,
+      provider: 'sthstart-public',
+      freeEgg: false,
+      hasApiKey: true,
+      preview: '',
+      baseURL: '',
+      model: '',
+      thinkingMode: 'disabled',
+      headers: {},
+      extraBody: {},
+    };
+  }
   const freeEgg = config.llm.freeEgg === true;
   const key = resolveLlmApiKey();
   const preview = !key ? '' : (key.length <= 12 ? '***' : `${key.slice(0, 5)}...${key.slice(-4)}`);
   return {
+    managed: false,
     provider: config.llm.provider,
     freeEgg,
     // 免费鸡蛋模式下无需 Key 即可用，视为已配置，避免前端"未设置 Key"横幅误报

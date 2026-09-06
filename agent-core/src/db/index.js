@@ -768,6 +768,9 @@ function initSchema(db) {
     console.log('[db] feature_dreams cleanup skipped:', err.message);
   }
 
+  // 迁移: SthStart 公共角色库来源信息（仅描述静态人设版本，不触碰角色运行状态）
+  migratePublicCharacterSource(db);
+
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
   // 种子: 表情类别（仅首次运行插入默认 15 类）
@@ -2317,4 +2320,18 @@ function loadSystemSettings(db) {
   if (applied > 0) {
     console.log(`[db] system_settings: ${applied} keys applied to config`);
   }
+}
+
+function migratePublicCharacterSource(db) {
+  const columns = new Set(db.prepare(`PRAGMA table_info(characters)`).all().map(c => c.name));
+  if (!columns.has('source_character_id')) db.exec(`ALTER TABLE characters ADD COLUMN source_character_id TEXT`);
+  if (!columns.has('source_character_version')) db.exec(`ALTER TABLE characters ADD COLUMN source_character_version INTEGER`);
+  if (!columns.has('source_prompt_hash')) db.exec(`ALTER TABLE characters ADD COLUMN source_prompt_hash TEXT`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_characters_source_character ON characters(source_character_id) WHERE source_character_id IS NOT NULL`);
+  db.exec(`CREATE TABLE IF NOT EXISTS public_character_relationship_links (
+    source_relationship_id TEXT PRIMARY KEY,
+    source_from_character_id TEXT NOT NULL,
+    source_to_character_id TEXT NOT NULL,
+    local_relationship_id INTEGER NOT NULL UNIQUE REFERENCES character_relationships(id) ON DELETE CASCADE
+  )`);
 }

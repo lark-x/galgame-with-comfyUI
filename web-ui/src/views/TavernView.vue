@@ -221,32 +221,53 @@
 
             <!-- 步骤 0：输入描述 -->
             <div v-if="recruit.step === 'input'" class="modal-body" style="position:relative;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:14px;padding:18px;margin:0 20px 20px">
-              <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名+IP），也可以是原创设定。</p>
-              <linshe-input
-                type="textarea"
-                v-model="recruit.desc"
-                class="recruit-textarea"
-                rows="4"
-                placeholder="例：安比·德玛拉（绝区零）/ 流萤，星穹铁道/ 御坂美琴《某科学的超电磁炮》/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
-                :disabled="recruit.loading"
-                @keydown.enter.exact="doGenerate"
-              />
-              <div class="modal-actions">
-                <label class="import-card-btn" :class="{ disabled: recruit.loading }" title="导入酒馆ai角色卡">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                  <span>导入酒馆ai角色卡</span>
-                  <input ref="cardInputRef" type="file" accept=".png,.json,image/png,application/json" :disabled="recruit.loading" @change="onCardSelected" hidden />
-                </label>
-                <linshe-button variant="secondary" @click="closeRecruit">取消</linshe-button>
-                <linshe-button
-                  variant="primary"
-                  :disabled="!recruit.desc.trim() || recruit.loading"
-                  @click="doGenerate"
-                >
-                  {{ recruit.loading ? '正在酒馆招募...' : '✨ 招募角色' }}
-                </linshe-button>
+              <div class="recruit-source-tabs">
+                <button :class="{ active: recruit.mode === 'create' }" @click="recruit.mode = 'create'">现场招募</button>
+                <button :class="{ active: recruit.mode === 'library' }" @click="openPublicLibrary">公共角色库</button>
               </div>
-<div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+              <p v-if="recruit.mode === 'create'" class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名+IP），也可以是原创设定。</p>
+              <template v-if="recruit.mode === 'create'">
+                <linshe-input
+                  type="textarea"
+                  v-model="recruit.desc"
+                  class="recruit-textarea"
+                  rows="4"
+                  placeholder="例：安比·德玛拉（绝区零）/ 流萤，星穹铁道/ 御坂美琴《某科学的超电磁炮》/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
+                  :disabled="recruit.loading"
+                  @keydown.enter.exact="doGenerate"
+                />
+                <div class="modal-actions">
+                  <label class="import-card-btn" :class="{ disabled: recruit.loading }" title="导入酒馆ai角色卡">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <span>导入酒馆ai角色卡</span>
+                    <input ref="cardInputRef" type="file" accept=".png,.json,image/png,application/json" :disabled="recruit.loading" @change="onCardSelected" hidden />
+                  </label>
+                  <linshe-button variant="secondary" @click="closeRecruit">取消</linshe-button>
+                  <linshe-button
+                    variant="primary"
+                    :disabled="!recruit.desc.trim() || recruit.loading"
+                    @click="doGenerate"
+                  >
+                    {{ recruit.loading ? '正在酒馆招募...' : '✨ 招募角色' }}
+                  </linshe-button>
+                </div>
+                <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+              </template>
+              <div v-else class="public-character-library">
+                <p class="modal-hint">这里显示 SthStart 主页面发布的角色。发布新版本时支持一键同步升级。</p>
+                <div v-if="recruit.libraryLoading" class="public-library-empty">正在读取公共角色库…</div>
+                <div v-else-if="!recruit.library.length" class="public-library-empty">暂无已发布角色，或公共服务尚未连接。</div>
+                <div v-for="item in recruit.library" :key="item.id" class="public-character-row">
+                  <div>
+                    <strong>{{ item.display_name }}</strong>
+                    <span>v{{ item.latest_version }}<template v-if="item.imported_version"> · 已导入 v{{ item.imported_version }}</template></span>
+                  </div>
+                  <linshe-button v-if="!item.local_id" variant="primary" :disabled="recruit.saving" @click="importFromPublic(item)">招募</linshe-button>
+                  <linshe-button v-else-if="item.update_available" variant="primary" :disabled="recruit.saving" @click="upgradeFromPublic(item)">升级</linshe-button>
+                  <span v-else class="public-character-current">已同步</span>
+                </div>
+                <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+              </div>
               <!-- 招募加载遮罩 -->
               <div v-if="recruit.loading" class="scan-overlay">
                 <div class="scan-line"></div>
@@ -734,6 +755,7 @@ function cancelEditPersona() {
 const recruit = reactive({
   show: false,
   step: 'input',   // 'input' | 'preview'
+  mode: 'create',  // 'create' | 'library'
   desc: '',
   loading: false,
   saving: false,
@@ -741,6 +763,8 @@ const recruit = reactive({
   result: null,    // 生成结果
   task: null,      // 'search' | 'regenerate'
   searchContext: '', // 首次联网搜索得到的原始资料，用于重新归纳
+  library: [],
+  libraryLoading: false,
 })
 
 // 招募加载提示语轮播
@@ -784,6 +808,7 @@ function showToast(message, type = 'info') {
 function openRecruit() {
   recruit.show = true
   recruit.step = 'input'
+  recruit.mode = 'create'
   recruit.desc = ''
   recruit.error = ''
   recruit.result = null
@@ -791,6 +816,62 @@ function openRecruit() {
   recruit.saving = false
   recruit.task = null
   recruit.searchContext = ''
+  recruit.library = []
+}
+
+async function openPublicLibrary() {
+  recruit.mode = 'library'
+  recruit.error = ''
+  recruit.libraryLoading = true
+  try {
+    const result = await api.listPublicCharacters()
+    if (result.error) throw new Error(result.error)
+    recruit.library = result.characters || []
+  } catch (err) {
+    recruit.error = '公共角色库不可用：' + (err.message || '网络错误')
+    recruit.library = []
+  } finally {
+    recruit.libraryLoading = false
+  }
+}
+
+async function importFromPublic(item) {
+  recruit.saving = true
+  recruit.error = ''
+  try {
+    const result = await api.importPublicCharacter(item.id, item.latest_version)
+    if (result.error) throw new Error(result.error)
+    await chat.loadCharacters()
+    await openPublicLibrary()
+    showToast(`已从公共角色库招募「${item.display_name}」`, 'success')
+  } catch (err) {
+    recruit.error = '招募失败：' + (err.message || '网络错误')
+  } finally {
+    recruit.saving = false
+  }
+}
+
+async function upgradeFromPublic(item) {
+  const ok = await confirmFn({ title: '升级角色资料', message: `将「${item.display_name}」从 v${item.imported_version} 升级到 v${item.latest_version}。聊天、记忆、好感和日程不会改变。`, okText: '确认升级' })
+  if (!ok) return
+  recruit.saving = true
+  recruit.error = ''
+  try {
+    let result = await api.updatePublicCharacter(item.local_id)
+    if (result.error === 'local_character_modified') {
+      const overwrite = await confirmFn({ title: '邻舍人设存在本地修改', message: '升级会覆盖邻舍里手动修改的人格内容，但不会清除聊天、记忆和好感。是否继续？', okText: '覆盖并升级', danger: true })
+      if (!overwrite) return
+      result = await api.updatePublicCharacter(item.local_id, true)
+    }
+    if (result.error) throw new Error(result.message || result.error)
+    await chat.loadCharacters()
+    await openPublicLibrary()
+    showToast(`「${item.display_name}」已升级到 v${result.source_version}`, 'success')
+  } catch (err) {
+    recruit.error = '升级失败：' + (err.message || '网络错误')
+  } finally {
+    recruit.saving = false
+  }
 }
 
 function closeRecruit() {
@@ -2739,4 +2820,67 @@ onMounted(async () => {
   }
 }
 
+.recruit-source-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.04);
+}
+.recruit-source-tabs button {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+.recruit-source-tabs button.active {
+  background: var(--glass-bg, #fff);
+  color: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  font-weight: 600;
+}
+.public-character-library {
+  display: grid;
+  gap: 8px;
+}
+.public-character-row {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--border);
+}
+.public-character-row > div {
+  display: grid;
+  gap: 2px;
+}
+.public-character-row strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.public-character-row span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.public-character-current {
+  padding-right: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.public-library-empty {
+  padding: 32px 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+}
 </style>

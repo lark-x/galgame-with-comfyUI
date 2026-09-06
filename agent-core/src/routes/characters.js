@@ -24,8 +24,137 @@ import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
 import { buildCharacterPersona } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
+import {
+  promptHash,
+  publicCharacterRequest,
+  syncPublicRelationships,
+  importPublicAvatar,
+  parseImageValues,
+  imageIdentity,
+  persistGeneratedImage,
+  imageDisplayUrl,
+  toClientImage,
+} from '../integrations/sthstart/index.js';
 
 const router = Router();
+
+// GET /api/characters/public-library — 查询 SthStart 公共角色库列表及本地对照
+router.get('/public-library', async (_req, res) => {
+  try {
+    const data = await publicCharacterRequest('characters');
+    const db = getDb();
+    const locals = db.prepare(`SELECT id,source_character_id,source_character_version,source_prompt_hash,base_prompt FROM characters WHERE source_character_id IS NOT NULL`).all();
+    const localMap = new Map(locals.map(item => [item.source_character_id, item]));
+    const items = (data.characters || []).map(item => {
+      const local = localMap.get(item.id);
+      const locallyModified = local ? promptHash(local.base_prompt) !== local.source_prompt_hash : false;
+      return {
+        id: item.id,
+        slug: item.slug,
+        display_name: item.display_name,
+        avatar_url: item.avatar_url,
+        latest_version: item.latest_version,
+        local_id: local ? local.id : null,
+        imported_version: local ? local.source_character_version : null,
+        update_available: local ? item.latest_version > (local.source_character_version || 0) : false,
+        locally_modified: locallyModified,
+      };
+    });
+    res.json({ ok: true, characters: items });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/characters/import-public — 从公共库招募一个发布版本
+router.post('/import-public', async (req, res) => {
+  const characterId = String(req.body?.characterId || '').trim();
+  if (!characterId) return res.status(400).json({ error: 'characterId is required' });
+  try {
+    const detail = await publicCharacterRequest(`characters/${encodeURIComponent(characterId)}${req.body?.version ? `?version=${Number(req.body.version)}` : ''}`);
+    const snapshot = detail.version;
+    const draft = snapshot?.data || {};
+    const basePrompt = snapshot?.compiledLinshePrompt || '';
+    if (!basePrompt) return res.status(400).json({ error: '公共角色版本缺少邻舍人格内容' });
+    const db = getDb();
+    if (db.prepare('SELECT id FROM characters WHERE source_character_id = ?').get(characterId)) {
+      return res.status(409).json({ error: '该公共角色已经招募' });
+    }
+    const stem = String(draft.englishName || detail.slug || `sth_${characterId.slice(0, 8)}`).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || `sth_${Date.now()}`;
+    let name = stem;
+    let suffix = 2;
+    while (db.prepare('SELECT 1 FROM characters WHERE name=?').get(name)) {
+      name = `${stem}_${suffix++}`;
+    }
+    const shortPrompt = cropPersonalityForEmotion(basePrompt, draft.displayName || detail.display_name || name);
+    const result = db.prepare(`INSERT INTO characters(name,display_name,base_prompt,short_prompt,emotion_baseline,source_character_id,source_character_version,source_prompt_hash) VALUES (?,?,?,?,?,?,?,?)`).run(
+      name,
+      draft.displayName || detail.display_name || name,
+      basePrompt,
+      shortPrompt,
+      '{"valence":0.5,"arousal":0.5,"dominance":0.5}',
+      characterId,
+      snapshot.version,
+      promptHash(basePrompt)
+    );
+    const localId = String(result.lastInsertRowid);
+    await publicCharacterRequest('app-characters', {
+      method: 'POST',
+      body: JSON.stringify({ characterId, version: snapshot.version, localId }),
+    }).catch(() => {});
+    syncPublicRelationships(db, characterId, snapshot.relationships || detail.relationships || []);
+    const avatarPath = await importPublicAvatar(detail.avatar_url, localId);
+    if (avatarPath) {
+      db.prepare('UPDATE characters SET avatar_path=? WHERE id=?').run(avatarPath, result.lastInsertRowid);
+    }
+    refreshCharSearch();
+    res.status(201).json({
+      id: result.lastInsertRowid,
+      display_name: draft.displayName || detail.display_name,
+      source_version: snapshot.version,
+    });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/characters/:id/update-public — 确认后升级静态人设，保留聊天与运行状态
+router.post('/:id/update-public', async (req, res) => {
+  const db = getDb();
+  const local = db.prepare(`SELECT id,base_prompt,source_character_id,source_character_version,source_prompt_hash FROM characters WHERE id=?`).get(req.params.id);
+  if (!local?.source_character_id) return res.status(404).json({ error: '该角色不是从公共角色库导入的' });
+  const locallyModified = promptHash(local.base_prompt) !== local.source_prompt_hash;
+  if (locallyModified && !req.body?.force) {
+    return res.status(409).json({ error: 'local_character_modified', message: '邻舍中的人格已被修改，确认覆盖后才能升级。' });
+  }
+  try {
+    const detail = await publicCharacterRequest(`characters/${encodeURIComponent(local.source_character_id)}`);
+    const snapshot = detail.version;
+    const draft = snapshot.data || {};
+    const basePrompt = snapshot.compiledLinshePrompt;
+    db.prepare(`UPDATE characters SET display_name=?,base_prompt=?,short_prompt=?,source_character_version=?,source_prompt_hash=? WHERE id=?`).run(
+      draft.displayName || detail.display_name,
+      basePrompt,
+      cropPersonalityForEmotion(basePrompt, draft.displayName || detail.display_name),
+      snapshot.version,
+      promptHash(basePrompt),
+      local.id
+    );
+    await publicCharacterRequest('app-characters', {
+      method: 'POST',
+      body: JSON.stringify({ characterId: local.source_character_id, version: snapshot.version, localId: String(local.id) }),
+    }).catch(() => {});
+    syncPublicRelationships(db, local.source_character_id, snapshot.relationships || detail.relationships || []);
+    const avatarPath = await importPublicAvatar(detail.avatar_url, local.id);
+    if (avatarPath) {
+      db.prepare('UPDATE characters SET avatar_path=? WHERE id=?').run(avatarPath, local.id);
+    }
+    refreshCharSearch();
+    res.json({ ok: true, source_version: snapshot.version, previous_version: local.source_character_version });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // GET /api/characters — 列出角色，含最近消息摘要
 router.get('/', (req, res) => {
@@ -286,7 +415,12 @@ router.get('/:id/recent-images', (req, res) => {
   const urls = [];
   const seen = new Set();
   const push = (u) => {
-    if (typeof u === 'string' && u.trim() && !seen.has(u)) { seen.add(u); urls.push(u); }
+    const url = imageDisplayUrl(u);
+    const key = imageIdentity(u);
+    if (url && key && !seen.has(key)) {
+      seen.add(key);
+      urls.push(url);
+    }
   };
 
   // 1. 生图任务登记：所有以 char_{id} 为前缀的渠道（私聊配图 / 送礼 / 主动聊天 / 立绘 /
@@ -298,9 +432,7 @@ router.get('/:id/recent-images', (req, res) => {
     ORDER BY COALESCE(finished_at, created_at) DESC LIMIT 120
   `).all(conversationId, `${conversationId}_*`);
   for (const row of taskRows) {
-    try {
-      for (const u of JSON.parse(row.output_paths)) push(u);
-    } catch {}
+    for (const u of parseImageValues(row.output_paths)) push(u);
   }
 
   // 2. 私聊气泡配图（兜底：用户上传、未登记任务的图片）
@@ -310,9 +442,7 @@ router.get('/:id/recent-images', (req, res) => {
     ORDER BY id DESC LIMIT 60
   `).all(conversationId);
   for (const row of chatRows) {
-    try {
-      for (const u of JSON.parse(row.images)) push(u);
-    } catch {}
+    for (const u of parseImageValues(row.images)) push(u);
   }
 
   // 3. 朋友圈配图（新图已入 image_tasks，这里兜底老数据）
@@ -322,9 +452,7 @@ router.get('/:id/recent-images', (req, res) => {
     ORDER BY created_at DESC LIMIT 60
   `).all(characterId);
   for (const row of momentRows) {
-    try {
-      for (const u of JSON.parse(row.images)) push(u);
-    } catch {}
+    for (const u of parseImageValues(row.images)) push(u);
   }
 
   // 4. 表情包
@@ -921,12 +1049,13 @@ router.post('/:id/gift', async (req, res) => {
         if (imgResult.success && imgResult.images.length > 0) {
           const img = imgResult.images[0];
           const filename = `gift_${Date.now()}_${img.filename || 'comfy.png'}`;
-          const imageUrl = saveBase64Image('gifts', filename, img.base64);
+          const storedImage = persistGeneratedImage(img, 'gifts', filename);
+          const imageUrl = imageDisplayUrl(storedImage);
           db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
             VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-            .run(conversationId, result.imagePrompt, imgResult.promptRefined || result.imagePrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+            .run(conversationId, result.imagePrompt, imgResult.promptRefined || result.imagePrompt, JSON.stringify([storedImage]), getLastWorkflowMode());
           db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
-            .run(JSON.stringify([imageUrl]), msgId);
+            .run(JSON.stringify([storedImage]), msgId);
           console.log(`[gift] image attached to msg #${msgId}: ${imageUrl}`);
         }
       }).catch(err => {
@@ -1093,8 +1222,9 @@ ${buildCharacterPersona(char, { variant: 'full' })}
       for (const img of result.images) {
         const ts = Date.now();
         const filename = `avatar_gen_${req.params.id}_${ts}_${img.filename || 'comfy.png'}`;
-        const url = saveBase64Image('avatargen', filename, img.base64);
-        savedPaths.push(url);
+        const stored = persistGeneratedImage(img, 'avatargen', filename);
+        const url = imageDisplayUrl(stored);
+        if (url) savedPaths.push(url);
         img.url = url;
       }
 
@@ -1109,7 +1239,7 @@ ${buildCharacterPersona(char, { variant: 'full' })}
 
       res.json({
         success: true,
-        images: result.images,
+        images: result.images.map(toClientImage),
         savedPaths,
         promptId: result.promptId,
         promptText,
@@ -1238,19 +1368,20 @@ async function renderStandingImage(char, promptText) {
   // 旧立绘文件先清掉，再保存新图
   const db = getDb();
   const old = db.prepare('SELECT standing_url FROM characters WHERE id = ?').get(char.id);
-  if (old?.standing_url) deleteImageFileByUrl(old.standing_url);
+  if (old?.standing_url && !old.standing_url.startsWith('/api/images/artifacts')) deleteImageFileByUrl(old.standing_url);
 
   const ts = Date.now();
   const img = result.images[0];
   const filename = `standing_${char.id}_${ts}_${img.filename || 'comfy.png'}`;
-  const url = saveBase64Image('standing', filename, img.base64);
+  const stored = persistGeneratedImage(img, 'standing', filename);
+  const url = imageDisplayUrl(stored);
   db.prepare('UPDATE characters SET standing_url = ? WHERE id = ?').run(url, char.id);
 
   console.log(`[generate-standing] Image saved: ${url}`);
 
   db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
     VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-    .run(`char_${char.id}_standing`, promptText, result.promptRefined || promptText, JSON.stringify([url]), getLastWorkflowMode());
+    .run(`char_${char.id}_standing`, promptText, result.promptRefined || promptText, JSON.stringify([stored]), getLastWorkflowMode());
 
   invalidateGalleryCache();
   return url;
@@ -1293,7 +1424,7 @@ router.post('/:id/standing-upload', (req, res) => {
   }
 
   try {
-    if (char.standing_url) deleteImageFileByUrl(char.standing_url);
+    if (char.standing_url && !char.standing_url.startsWith('/api/images/artifacts')) deleteImageFileByUrl(char.standing_url);
     const ext = mimeMatch[1].toLowerCase() === 'jpeg' ? 'jpg' : mimeMatch[1].toLowerCase();
     const filename = `standing_${char.id}_${Date.now()}_upload.${ext}`;
     const url = saveBase64Image('standing', filename, base64);
@@ -1312,7 +1443,7 @@ router.delete('/:id/standing', (req, res) => {
   const char = db.prepare('SELECT standing_url FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
   if (char.standing_url) {
-    deleteImageFileByUrl(char.standing_url);
+    if (!char.standing_url.startsWith('/api/images/artifacts')) deleteImageFileByUrl(char.standing_url);
     db.prepare('UPDATE characters SET standing_url = NULL WHERE id = ?').run(req.params.id);
     invalidateGalleryCache();
   }

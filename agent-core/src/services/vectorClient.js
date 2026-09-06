@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { isSthStartVectorManaged, requestSthStartVector } from '../integrations/sthstart/vector.js';
 
 /**
  * 向量服务 HTTP 客户端
@@ -19,12 +20,19 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT) 
   }
 }
 
-export async function embedText(text) {
-  const res = await fetchWithTimeout(`${BASE}/embed`, {
+async function vectorRequest(route, body, timeoutMs = DEFAULT_TIMEOUT) {
+  if (isSthStartVectorManaged()) {
+    return await requestSthStartVector(route, body, timeoutMs);
+  }
+  return fetchWithTimeout(`${BASE}/${route}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
+    body: JSON.stringify(body),
+  }, timeoutMs);
+}
+
+export async function embedText(text) {
+  const res = await vectorRequest('embed', { text });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Embed error: ${err.detail || res.status}`);
@@ -35,11 +43,7 @@ export async function embedText(text) {
 }
 
 export async function embedBatch(texts) {
-  const res = await fetchWithTimeout(`${BASE}/embed`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: texts }),
-  });
+  const res = await vectorRequest('embed', { text: texts });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Embed error: ${err.detail || res.status}`);
@@ -49,11 +53,7 @@ export async function embedBatch(texts) {
 }
 
 export async function vectorSearch(text, { topK = 20, filterType = null, conversationId = null, corpus = 'memory_fragments', embedding = null, timeoutMs = DEFAULT_TIMEOUT } = {}) {
-  const res = await fetchWithTimeout(`${BASE}/search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, embedding, top_k: topK, filter_type: filterType, conversation_id: conversationId, corpus }),
-  }, timeoutMs);
+  const res = await vectorRequest('search', { text, embedding, top_k: topK, filter_type: filterType, conversation_id: conversationId, corpus }, timeoutMs);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Search error: ${err.detail || res.status}`);
@@ -63,17 +63,13 @@ export async function vectorSearch(text, { topK = 20, filterType = null, convers
 }
 
 export async function upsertVector(chromaId, text, metadata = {}, fragmentType = null, corpus = 'memory_fragments', embedding = null) {
-  const res = await fetchWithTimeout(`${BASE}/upsert`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chroma_id: chromaId,
-      text,
-      embedding,
-      metadata,
-      fragment_type: fragmentType,
-      corpus,
-    }),
+  const res = await vectorRequest('upsert', {
+    chroma_id: chromaId,
+    text,
+    embedding,
+    metadata,
+    fragment_type: fragmentType,
+    corpus,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -84,11 +80,7 @@ export async function upsertVector(chromaId, text, metadata = {}, fragmentType =
 }
 
 export async function upsertVectors(items, corpus = 'memory_fragments', timeoutMs = DEFAULT_TIMEOUT) {
-  const res = await fetchWithTimeout(`${BASE}/upsert-batch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items, corpus }),
-  }, timeoutMs);
+  const res = await vectorRequest('upsert-batch', { items, corpus }, timeoutMs);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Batch upsert error: ${err.detail || res.status}`);
@@ -98,11 +90,7 @@ export async function upsertVectors(items, corpus = 'memory_fragments', timeoutM
 }
 
 export async function deleteVector(chromaId, corpus = 'memory_fragments') {
-  const res = await fetchWithTimeout(`${BASE}/delete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chroma_id: chromaId, corpus }),
-  });
+  const res = await vectorRequest('delete', { chroma_id: chromaId, corpus });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Delete error: ${err.detail || res.status}`);
@@ -111,11 +99,7 @@ export async function deleteVector(chromaId, corpus = 'memory_fragments') {
 }
 
 export async function deleteByConversation(conversationId, corpus = 'memory_fragments') {
-  const res = await fetchWithTimeout(`${BASE}/delete-by-conversation`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversation_id: conversationId, corpus }),
-  });
+  const res = await vectorRequest('delete-by-conversation', { conversation_id: conversationId, corpus });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`DeleteByConversation error: ${err.detail || res.status}`);

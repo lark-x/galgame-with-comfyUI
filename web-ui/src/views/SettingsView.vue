@@ -298,9 +298,13 @@
       <!-- LLM API 设置 -->
       <div class="card">
         <div class="llm-card-header">
-          <h3>LLM API 设置</h3>
+          <h3>
+            LLM API 设置
+            <span v-if="publicLlm.managed" class="managed-badge">SthStart 托管</span>
+          </h3>
           <!-- 每日免费鸡蛋：点击开启/关闭，免 Key 走 opencode zen 免费端点 -->
           <div
+            v-if="!publicLlm.managed"
             ref="freeEggBtn"
             role="button"
             tabindex="0"
@@ -319,7 +323,73 @@
           </div>
         </div>
 
-        <Transition name="egg-page" mode="out-in">
+        <!-- 托管模式面板 -->
+        <div v-if="publicLlm.managed" class="managed-llm-panel">
+          <p class="fd">邻舍当前由 SthStart 公共服务集中托管。模型调用、凭据管理与思考模式均由 SthStart 统一控制。</p>
+
+          <div class="managed-status-box" :class="{ 'is-connected': publicLlm.connected, 'is-unreachable': !publicLlm.connected }">
+            <div class="managed-conn-row">
+              <span class="managed-dot" :class="{ 'dot-online': publicLlm.connected, 'dot-offline': !publicLlm.connected }"></span>
+              <span class="managed-conn-text">{{ publicLlm.connected ? '已连接 SthStart 公共服务底座' : (publicLlm.error || '无法连接 SthStart 公共服务') }}</span>
+            </div>
+
+            <div class="managed-roles-grid">
+              <div class="managed-role-card">
+                <div class="managed-role-header">
+                  <span class="managed-role-label">文本模型 (Text)</span>
+                  <span v-if="publicLlm.text" :class="['managed-role-tag', publicLlm.text.ready ? 'tag-ready' : 'tag-unready']">
+                    {{ publicLlm.text.ready ? '就绪' : '未就绪' }}
+                  </span>
+                  <span v-else class="managed-role-tag tag-missing">未绑定</span>
+                </div>
+                <div class="managed-role-content">
+                  <template v-if="publicLlm.text">
+                    <div class="managed-tpl-name">{{ publicLlm.text.name }} <code class="managed-profile-id font-mono">({{ publicLlm.text.profileId }})</code></div>
+                    <div class="managed-model-name font-mono">模型：{{ publicLlm.text.model || '未指定模型' }}</div>
+                  </template>
+                  <template v-else>
+                    <div class="managed-empty-hint">⚠️ 尚未绑定文本模板，对话功能将不可用</div>
+                  </template>
+                </div>
+              </div>
+
+              <div class="managed-role-card">
+                <div class="managed-role-header">
+                  <span class="managed-role-label">多模态模型 (Multimodal)</span>
+                  <span v-if="publicLlm.multimodal" :class="['managed-role-tag', publicLlm.multimodal.ready ? 'tag-ready' : 'tag-unready']">
+                    {{ publicLlm.multimodal.ready ? '就绪' : '未就绪' }}
+                  </span>
+                  <span v-else class="managed-role-tag tag-optional">未绑定</span>
+                </div>
+                <div class="managed-role-content">
+                  <template v-if="publicLlm.multimodal">
+                    <div class="managed-tpl-name">{{ publicLlm.multimodal.name }} <code class="managed-profile-id font-mono">({{ publicLlm.multimodal.profileId }})</code></div>
+                    <div class="managed-model-name font-mono">模型：{{ publicLlm.multimodal.model || '未指定模型' }}</div>
+                  </template>
+                  <template v-else>
+                    <div class="managed-empty-hint text-muted">未绑定多模态模板（仅支持纯文本交互）</div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="managed-footer-actions">
+            <a
+              :href="(publicLlm.portalUrl || 'http://127.0.0.1:4173') + '/settings/public-services#app-model-routing'"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="managed-portal-link"
+            >
+              前往 SthStart 管理公共模型 ↗
+            </a>
+            <span class="managed-notice-text">
+              API 凭据安全保存在系统凭据库中；如需更换模板或修改模型，请在 SthStart 控制台进行配置。
+            </span>
+          </div>
+        </div>
+
+        <Transition v-else name="egg-page" mode="out-in">
         <div v-if="!freeEgg" key="llm-custom" class="llm-api-switch-body">
         <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口</p>
         <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少</p>
@@ -1252,6 +1322,7 @@ const llmExtraBodyValid = computed(() => {
   try { JSON.parse(llmExtraBodyText.value); return true } catch { return false }
 })
 const showApiKey = ref(false)
+const publicLlm = ref({ managed: false, connected: false, ready: false, text: null, multimodal: null, portalUrl: '' })
 const llmDirty = ref(false)
 const llmSaved = ref(false)
 const llmTesting = ref(false)
@@ -1650,6 +1721,7 @@ onMounted(async () => {
       disturbSkipWeekends.value = data.disturb.skipWeekends ?? false
     }
     weatherCity.value = data.weather?.city || ''
+    if (data.publicLlm) publicLlm.value = data.publicLlm
     llmPreview.value = { ...data.llm }
     freeEgg.value = data.llm?.freeEgg === true
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
@@ -3336,4 +3408,138 @@ function resetTestPrompts() {
 .modal-fade-enter-active { transition: opacity 0.3s ease; }
 .modal-fade-leave-active { transition: opacity 0.2s ease; }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
+
+/* SthStart Managed LLM Panel */
+.managed-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.managed-llm-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.managed-status-box {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.managed-conn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.managed-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.dot-online {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+.dot-offline {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+}
+.managed-roles-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .managed-roles-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.managed-role-card {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.managed-role-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.managed-role-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.managed-role-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.tag-ready {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+.tag-unready, .tag-missing {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+}
+.tag-optional {
+  background: rgba(107, 114, 128, 0.15);
+  color: #6b7280;
+}
+.managed-tpl-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-bright);
+}
+.managed-profile-id {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.managed-model-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.managed-empty-hint {
+  font-size: 12px;
+  color: #dc2626;
+}
+.managed-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.managed-portal-link {
+  display: inline-block;
+  font-size: 12px;
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 500;
+}
+.managed-portal-link:hover {
+  filter: brightness(1.08);
+}
+.managed-notice-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  flex: 1;
+}
 </style>
