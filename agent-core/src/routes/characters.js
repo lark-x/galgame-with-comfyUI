@@ -34,6 +34,7 @@ import {
   persistGeneratedImage,
   imageDisplayUrl,
   toClientImage,
+  normalizePublicCharacterList,
 } from '../integrations/sthstart/index.js';
 
 const router = Router();
@@ -45,7 +46,8 @@ router.get('/public-library', async (_req, res) => {
     const db = getDb();
     const locals = db.prepare(`SELECT id,source_character_id,source_character_version,source_prompt_hash,base_prompt FROM characters WHERE source_character_id IS NOT NULL`).all();
     const localMap = new Map(locals.map(item => [item.source_character_id, item]));
-    const items = (data.characters || []).map(item => {
+    const publicCharacters = normalizePublicCharacterList(data);
+    const items = publicCharacters.map(item => {
       const local = localMap.get(item.id);
       const locallyModified = local ? promptHash(local.base_prompt) !== local.source_prompt_hash : false;
       return {
