@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, updateWorkflowCustomTemplate, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays } from '../config.js';
+import { config, getPublicLlmStatus, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, updateWorkflowCustomTemplate, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays } from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -20,6 +20,12 @@ import { getPreferredMemoryEmbeddingProfile, testEmbeddingProvider, testReranker
 import { reindexAllMemories } from '../services/memory/memoryRepository.js';
 
 const router = Router();
+
+// GET /api/config/public-services/status — SthStart 公共服务连接状态
+router.get('/public-services/status', async (_req, res) => {
+  const status = await getPublicLlmStatus();
+  res.json(status);
+});
 
 // 内置官方地址（仅 DeepSeek，其余走自定义中转站）。
 // 命中这些地址时视为官方直连：用于自动关闭「后台 LLM 任务队列」等仅自定义场景可用的开关。
@@ -73,7 +79,8 @@ router.post('/memory/test-reranker', async (req, res) => {
 });
 
 // GET /api/config — 获取全部配置
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
+  const publicLlm = await getPublicLlmStatus();
   res.json({
     comfy: {
       imageProvider: config.comfyui.imageProvider || 'comfyui',
@@ -120,6 +127,7 @@ router.get('/', (req, res) => {
     features: config.features,
     weather: { city: config.weather.city || '' },
     llm: getLlmConfig(),
+    publicLlm,
     llmProfiles: getLlmProfiles(),
     activeLlmProfileId: getActiveProfileId(),
     disturb: {
@@ -303,6 +311,9 @@ router.put('/background-llm-concurrency', (req, res) => {
 
 // PUT /api/config/llm — 更新 LLM 配置
 router.put('/llm', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，LLM 配置由 SthStart 公共服务管理。' });
+  }
   const { apiKey, baseURL, model, thinkingMode, headers, extraBody } = req.body;
   const result = updateLlmConfig({ apiKey, baseURL, model, thinkingMode, headers, extraBody });
   if (!result.ok) {
@@ -323,6 +334,9 @@ router.put('/llm', (req, res) => {
 
 // PUT /api/config/llm/free-egg — 每日免费鸡蛋开关（opencode zen 免费端点，免 Key）
 router.put('/llm/free-egg', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，免费鸡蛋已禁用。' });
+  }
   const { enabled } = req.body;
   if (typeof enabled !== 'boolean') {
     return res.status(400).json({ error: 'enabled must be boolean' });
@@ -336,6 +350,9 @@ router.put('/llm/free-egg', (req, res) => {
 // GET /api/config/llm/key — 获取当前 LLM API Key（前端复制用）
 // 明文 Key 属敏感信息，仅限本机回环调用（手机端仍可从 /api/config 看到脱敏预览）
 router.get('/llm/key', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ ok: false, error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，密钥由 SthStart 安全凭据库管理。' });
+  }
   const addr = req.socket?.remoteAddress || '';
   const isLoopback = addr === '::1' || addr === '127.0.0.1' || addr === '::ffff:127.0.0.1';
   if (!isLoopback) {
@@ -372,6 +389,9 @@ router.post('/llm/test', async (req, res) => {
 });
 
 router.post('/llm/models', async (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，模型由 SthStart 公共服务管理。' });
+  }
   const baseURL = String(req.body?.baseURL || config.llm.baseURL || '').trim().replace(/\/+$/, '');
   if (!baseURL) return res.status(400).json({ error: '请先填写 API 地址' });
 
@@ -437,6 +457,9 @@ router.get('/llm/profiles', (req, res) => {
 
 // POST /api/config/llm/profiles — 新增 profile（默认快照当前 LLM 配置，可传字段覆盖）
 router.post('/llm/profiles', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，配置由 SthStart 公共服务管理。' });
+  }
   const { name, ...overrides } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'name is required' });
@@ -447,6 +470,9 @@ router.post('/llm/profiles', (req, res) => {
 
 // DELETE /api/config/llm/profiles/:id — 删除 profile
 router.delete('/llm/profiles/:id', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，配置由 SthStart 公共服务管理。' });
+  }
   const result = deleteLlmProfile(req.params.id);
   if (!result.ok) return res.status(400).json(result);
   resetClient();
@@ -455,6 +481,9 @@ router.delete('/llm/profiles/:id', (req, res) => {
 
 // POST /api/config/llm/profiles/:id/activate — 切换激活 profile
 router.post('/llm/profiles/:id/activate', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，配置由 SthStart 公共服务管理。' });
+  }
   const result = activateLlmProfile(req.params.id);
   if (!result.ok) return res.status(400).json(result);
   resetClient();
@@ -469,6 +498,9 @@ router.post('/llm/profiles/:id/activate', (req, res) => {
 
 // PUT /api/config/llm/profiles/active/sync — 同步当前配置到激活的 profile
 router.put('/llm/profiles/active/sync', (req, res) => {
+  if (config.publicServices.llm) {
+    return res.status(403).json({ error: 'llm_managed_by_sthstart', message: '当前处于 SthStart 托管模式，配置由 SthStart 公共服务管理。' });
+  }
   syncActiveLlmProfile();
   res.json({ ok: true });
 });

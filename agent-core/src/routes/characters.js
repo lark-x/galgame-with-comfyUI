@@ -32,8 +32,139 @@ import { collectCharacterImageUrls } from '../services/characterImages.js';
 import { pickReactionMarker } from '../services/emojiService.js';
 import { createCharacterBackgroundRouter } from './characterBackgrounds.js';
 import { generateDialogueBackground } from '../services/dialogueBackground.js';
+import {
+  promptHash,
+  publicCharacterRequest,
+  syncPublicRelationships,
+  importPublicAvatar,
+  parseImageValues,
+  imageIdentity,
+  persistGeneratedImage,
+  imageDisplayUrl,
+  toClientImage,
+  normalizePublicCharacterList,
+} from '../integrations/sthstart/index.js';
 
 const router = Router();
+
+// GET /api/characters/public-library — 查询 SthStart 公共角色库列表及本地对照
+router.get('/public-library', async (_req, res) => {
+  try {
+    const data = await publicCharacterRequest('characters');
+    const db = getDb();
+    const locals = db.prepare(`SELECT id,source_character_id,source_character_version,source_prompt_hash,base_prompt FROM characters WHERE source_character_id IS NOT NULL`).all();
+    const localMap = new Map(locals.map(item => [item.source_character_id, item]));
+    const publicCharacters = normalizePublicCharacterList(data);
+    const items = publicCharacters.map(item => {
+      const local = localMap.get(item.id);
+      const locallyModified = local ? promptHash(local.base_prompt) !== local.source_prompt_hash : false;
+      return {
+        id: item.id,
+        slug: item.slug,
+        display_name: item.display_name,
+        avatar_url: item.avatar_url,
+        latest_version: item.latest_version,
+        local_id: local ? local.id : null,
+        imported_version: local ? local.source_character_version : null,
+        update_available: local ? item.latest_version > (local.source_character_version || 0) : false,
+        locally_modified: locallyModified,
+      };
+    });
+    res.json({ ok: true, characters: items });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/characters/import-public — 从公共库招募一个发布版本
+router.post('/import-public', async (req, res) => {
+  const characterId = String(req.body?.characterId || '').trim();
+  if (!characterId) return res.status(400).json({ error: 'characterId is required' });
+  try {
+    const detail = await publicCharacterRequest(`characters/${encodeURIComponent(characterId)}${req.body?.version ? `?version=${Number(req.body.version)}` : ''}`);
+    const snapshot = detail.version;
+    const draft = snapshot?.data || {};
+    const basePrompt = snapshot?.compiledLinshePrompt || '';
+    if (!basePrompt) return res.status(400).json({ error: '公共角色版本缺少邻舍人格内容' });
+    const db = getDb();
+    if (db.prepare('SELECT id FROM characters WHERE source_character_id = ?').get(characterId)) {
+      return res.status(409).json({ error: '该公共角色已经招募' });
+    }
+    const stem = String(draft.englishName || detail.slug || `sth_${characterId.slice(0, 8)}`).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || `sth_${Date.now()}`;
+    let name = stem;
+    let suffix = 2;
+    while (db.prepare('SELECT 1 FROM characters WHERE name=?').get(name)) {
+      name = `${stem}_${suffix++}`;
+    }
+    const shortPrompt = cropPersonalityForEmotion(basePrompt, draft.displayName || detail.display_name || name);
+    const result = db.prepare(`INSERT INTO characters(name,display_name,base_prompt,short_prompt,emotion_baseline,source_character_id,source_character_version,source_prompt_hash) VALUES (?,?,?,?,?,?,?,?)`).run(
+      name,
+      draft.displayName || detail.display_name || name,
+      basePrompt,
+      shortPrompt,
+      '{"valence":0.5,"arousal":0.5,"dominance":0.5}',
+      characterId,
+      snapshot.version,
+      promptHash(basePrompt)
+    );
+    const localId = String(result.lastInsertRowid);
+    await publicCharacterRequest('app-characters', {
+      method: 'POST',
+      body: JSON.stringify({ characterId, version: snapshot.version, localId }),
+    }).catch(() => {});
+    syncPublicRelationships(db, characterId, snapshot.relationships || detail.relationships || []);
+    const avatarPath = await importPublicAvatar(detail.avatar_url, localId);
+    if (avatarPath) {
+      db.prepare('UPDATE characters SET avatar_path=? WHERE id=?').run(avatarPath, result.lastInsertRowid);
+    }
+    refreshCharSearch();
+    res.status(201).json({
+      id: result.lastInsertRowid,
+      display_name: draft.displayName || detail.display_name,
+      source_version: snapshot.version,
+    });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/characters/:id/update-public — 确认后升级静态人设，保留聊天与运行状态
+router.post('/:id/update-public', async (req, res) => {
+  const db = getDb();
+  const local = db.prepare(`SELECT id,base_prompt,source_character_id,source_character_version,source_prompt_hash FROM characters WHERE id=?`).get(req.params.id);
+  if (!local?.source_character_id) return res.status(404).json({ error: '该角色不是从公共角色库导入的' });
+  const locallyModified = promptHash(local.base_prompt) !== local.source_prompt_hash;
+  if (locallyModified && !req.body?.force) {
+    return res.status(409).json({ error: 'local_character_modified', message: '邻舍中的人格已被修改，确认覆盖后才能升级。' });
+  }
+  try {
+    const detail = await publicCharacterRequest(`characters/${encodeURIComponent(local.source_character_id)}`);
+    const snapshot = detail.version;
+    const draft = snapshot.data || {};
+    const basePrompt = snapshot.compiledLinshePrompt;
+    db.prepare(`UPDATE characters SET display_name=?,base_prompt=?,short_prompt=?,source_character_version=?,source_prompt_hash=? WHERE id=?`).run(
+      draft.displayName || detail.display_name,
+      basePrompt,
+      cropPersonalityForEmotion(basePrompt, draft.displayName || detail.display_name),
+      snapshot.version,
+      promptHash(basePrompt),
+      local.id
+    );
+    await publicCharacterRequest('app-characters', {
+      method: 'POST',
+      body: JSON.stringify({ characterId: local.source_character_id, version: snapshot.version, localId: String(local.id) }),
+    }).catch(() => {});
+    syncPublicRelationships(db, local.source_character_id, snapshot.relationships || detail.relationships || []);
+    const avatarPath = await importPublicAvatar(detail.avatar_url, local.id);
+    if (avatarPath) {
+      db.prepare('UPDATE characters SET avatar_path=? WHERE id=?').run(avatarPath, local.id);
+    }
+    refreshCharSearch();
+    res.json({ ok: true, source_version: snapshot.version, previous_version: local.source_character_version });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // GET /api/characters — 列出角色，含最近消息摘要
 router.get('/', (req, res) => {
@@ -501,7 +632,9 @@ router.post('/:id/avatar', (req, res) => {
 // 渠道聚合逻辑收口在 services/characterImages.js（相册按角色筛选共用同一口径）；
 // 磁盘上已不存在的 URL 一并过滤（重生成会替换删除旧文件，但 image_tasks 里的旧 URL 仍会返回，前端会 404）
 router.get('/:id/recent-images', (req, res) => {
-  const urls = collectCharacterImageUrls(req.params.id).filter(u => imageUrlExists(u));
+  const urls = collectCharacterImageUrls(req.params.id)
+    .map(u => imageDisplayUrl(u))
+    .filter(u => u && (u.startsWith('/api/images/artifacts') || imageUrlExists(u)));
   res.json({ images: urls });
 });
 
@@ -1079,12 +1212,13 @@ router.post('/:id/gift', async (req, res) => {
         if (imgResult.success && imgResult.images.length > 0) {
           const img = imgResult.images[0];
           const filename = `gift_${Date.now()}_${img.filename || 'comfy.png'}`;
-          const imageUrl = saveBase64Image('gifts', filename, img.base64);
+          const storedImage = persistGeneratedImage(img, 'gifts', filename);
+          const imageUrl = imageDisplayUrl(storedImage);
           db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
             VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-            .run(conversationId, result.imagePrompt, imgResult.promptRefined || result.imagePrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+            .run(conversationId, result.imagePrompt, imgResult.promptRefined || result.imagePrompt, JSON.stringify([storedImage]), getLastWorkflowMode());
           db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
-            .run(JSON.stringify([imageUrl]), msgId);
+            .run(JSON.stringify([storedImage]), msgId);
           console.log(`[gift] image attached to msg #${msgId}: ${imageUrl}`);
         }
       }).catch(err => {
@@ -1252,8 +1386,9 @@ ${buildCharacterPersona(char, { variant: 'full' })}
       for (const img of result.images) {
         const ts = Date.now();
         const filename = `avatar_gen_${req.params.id}_${ts}_${img.filename || 'comfy.png'}`;
-        const url = saveBase64Image('avatargen', filename, img.base64);
-        savedPaths.push(url);
+        const stored = persistGeneratedImage(img, 'avatargen', filename);
+        const url = imageDisplayUrl(stored);
+        if (url) savedPaths.push(url);
         img.url = url;
       }
 
@@ -1268,7 +1403,7 @@ ${buildCharacterPersona(char, { variant: 'full' })}
 
       res.json({
         success: true,
-        images: result.images,
+        images: result.images.map(toClientImage),
         savedPaths,
         promptId: result.promptId,
         promptText,

@@ -17,6 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'node:crypto';
 import { submitWorkflow, apiToGui } from './comfyClient.js';
 import { config, getNovelaiApiKey } from '../config.js';
 import { acquireSlot, releaseSlot } from './llmConcurrency.js';
@@ -564,6 +565,7 @@ async function submitWithRetry(rawPrompt, {
 
   // 3. 提交 ComfyUI，带重试循环
   let lastResult = null;
+  const publicRequestKey = `linshe-${randomUUID()}`;
 
   for (let attempt = 0; attempt <= submitRetries; attempt++) {
     if (attempt > 0) {
@@ -579,13 +581,15 @@ async function submitWithRetry(rawPrompt, {
     try {
       const result = await submitWorkflow(wf, (p) => {
         if (onProgress) onProgress({ stage: 'generating', ...p });
-      });
+      }, { idempotencyKey: publicRequestKey });
       if (result.images.length > 0) {
         console.log(`\n🎨 [imageSkill] 图片生成完成: ${result.images.length} 张 (workflow: ${wfMode}, promptId: ${result.promptId})`);
         return { success: true, images: result.images, source: 'api', promptId: result.promptId, wfMode };
       }
       lastResult = result;
     } catch (err) {
+      // Accepted/uncertain public requests must never be dispatched as a new task.
+      if (config.publicServices.image || err.acceptedPublicTask) throw err;
       console.error(`[imageSkill] ComfyUI attempt ${attempt + 1} failed:`, err.message);
       lastResult = { success: false, images: [], source: null, error: err.message };
     }

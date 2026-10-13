@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import WebSocket from 'ws';
 import { config } from '../config.js';
+import { submitPublicWorkflow, publicImageError } from '../integrations/sthstart/index.js';
 
 const getBase = () => config.comfyui.url.replace(/\/+$/, '');
 const getWsBase = () => config.comfyui.url.replace(/^http/, 'ws');
@@ -87,7 +88,7 @@ function startObjectInfoPolling() {
   poll(); // 立即尝试一次
   pollingTimer = setInterval(poll, 30_000);
   // 后台探测不应阻止进程退出（否则测试进程会被该定时器吊住）
-  pollingTimer.unref();
+  pollingTimer.unref?.();
 }
 
 // 模块加载时启动轮询
@@ -452,7 +453,15 @@ function formatComfyUIError(errText, status) {
   return `ComfyUI returned ${status}: ${errText.slice(0, 300)}`;
 }
 
-export async function submitWorkflow(guiWorkflow, onProgress) {
+export async function submitWorkflow(guiWorkflow, onProgress, options = {}) {
+  if (config.publicServices.image) {
+    if (!config.publicServices.appToken) {
+      throw publicImageError('邻舍已启用 SthStart 公共图片托管，但缺少应用授权令牌', {
+        code: 'sthstart_public_not_configured',
+      });
+    }
+    return await submitPublicWorkflow(guiWorkflow, onProgress, options);
+  }
   const clientId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const apiPrompt = guiToApi(guiWorkflow);
 
@@ -779,3 +788,6 @@ export function restartComfyClient() {
   // 重新开始轮询（poll() 内部会立即尝试一次）
   startObjectInfoPolling();
 }
+
+export { submitPublicWorkflow };
+
