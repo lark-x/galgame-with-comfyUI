@@ -263,11 +263,22 @@ function compactDatabaseIfFragmented() {
 async function portIsServing(port) {
   return new Promise((resolve) => {
     const sock = net.connect({ port, host: '127.0.0.1' });
-    const done = (v) => { try { sock.destroy(); } catch { /* 忽略 */ } resolve(v); };
+    let settled = false;
+    const done = (v) => {
+      if (!settled) {
+        settled = true;
+        try { sock.destroy(); } catch { /* 忽略 */ }
+        resolve(v);
+      }
+    };
     sock.setTimeout(1200);
-    sock.once('connect', () => done(true));
+    sock.once('connect', () => {
+      sock.write('HEAD / HTTP/1.0\r\n\r\n');
+    });
+    sock.once('data', () => done(true));
     sock.once('timeout', () => done(false));
     sock.once('error', () => done(false));
+    sock.once('close', () => done(false));
   });
 }
 
